@@ -136,8 +136,11 @@ else:
                                     values=df_metric["value"],
                                     hole=0.6,
                                     textinfo="label+percent",
-                                    textposition="outside",
-                                    showlegend=True,
+                                    textposition="inside",
+                                    insidetextorientation="radial",
+                                    showlegend=False,
+                                    textfont=dict(size=12),
+                                    automargin=True,
                                 )])
                                 total_str = f"{upload_totals[metric_key]:,.0f}".replace(",", " ")
                                 fig.add_annotation(
@@ -146,10 +149,9 @@ else:
                                     font=dict(size=24, color="gray"),
                                 )
                                 fig.update_layout(
-                                    title=f"Вклад по реценси — {metric_key}",
                                     height=500,
-                                    margin=dict(t=50, b=30, l=10, r=180),
-                                    legend=dict(orientation="v", yanchor="middle", y=0.5, x=1.02),
+                                    margin=dict(t=20, b=20, l=20, r=20),
+                                    uniformtext=dict(minsize=10, mode="hide"),
                                 )
                                 st.plotly_chart(fig, use_container_width=True)
     else:

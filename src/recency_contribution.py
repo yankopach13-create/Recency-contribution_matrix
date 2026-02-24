@@ -7,6 +7,7 @@
 from pathlib import Path
 from typing import Dict, Literal, Optional
 
+import numpy as np
 import pandas as pd
 
 from .load_base import (
@@ -49,11 +50,19 @@ MONTH_NAMES = {
 
 
 def _add_recency_month(df: pd.DataFrame, date_col: str = "last_purchase_date") -> pd.DataFrame:
-    """Добавляет колонки year_month (YYYY-MM) и month_label (например «Январь 2024»)."""
+    """Добавляет year_month, month_label и period_label (2024 — по кварталам, остальные годы — по месяцам)."""
     out = df.copy()
     out["year_month"] = out[date_col].dt.to_period("M").astype(str)
     out["month_label"] = (
         out[date_col].dt.month.map(MONTH_NAMES) + " " + out[date_col].dt.year.astype(str)
+    )
+    year = out[date_col].dt.year
+    month = out[date_col].dt.month
+    quarter = (month - 1) // 3 + 1
+    out["period_label"] = np.where(
+        year == 2024,
+        "Q" + quarter.astype(str) + " " + year.astype(str),
+        out["month_label"],
     )
     return out
 
@@ -157,7 +166,7 @@ def contribution_tables_from_upload(
 
     df_last = _add_recency_month(df_last_purchase)
     merged = work.merge(
-        df_last[[COL_CLIENT_CODE, "month_label"]],
+        df_last[[COL_CLIENT_CODE, "period_label"]],
         on=COL_CLIENT_CODE,
         how="inner",
     )
@@ -167,13 +176,14 @@ def contribution_tables_from_upload(
 
     def _table_for_metric(metric_col: str, agg: Literal["sum", "nunique"]) -> pd.DataFrame:
         if agg == "sum":
-            by_month = merged.groupby("month_label", as_index=False)[metric_col].sum()
+            by_period = merged.groupby("period_label", as_index=False)[metric_col].sum()
         else:
-            by_month = merged.groupby("month_label", as_index=False)[COL_CLIENT_CODE].nunique()
-        by_month.columns = ["month_label", "value"]
-        total = by_month["value"].sum()
-        by_month["pct"] = (by_month["value"] / total * 100).round(1) if total else 0
-        return by_month.sort_values("value", ascending=False).reset_index(drop=True)
+            by_period = merged.groupby("period_label", as_index=False)[COL_CLIENT_CODE].nunique()
+        by_period = by_period.rename(columns={"period_label": "month_label"})
+        by_period.columns = ["month_label", "value"]
+        total = by_period["value"].sum()
+        by_period["pct"] = (by_period["value"] / total * 100).round(1) if total else 0
+        return by_period.sort_values("value", ascending=False).reset_index(drop=True)
 
     return {
         "Продажи": _table_for_metric(UPLOAD_COL_SALES, "sum"),
