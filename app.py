@@ -13,6 +13,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import pandas as pd
 import streamlit as st
 import plotly.express as px
+import plotly.graph_objects as go
 
 from src.load_base import get_last_purchase_table
 from src.recency_contribution import (
@@ -95,21 +96,62 @@ else:
                             if not has_data:
                                 st.warning("Нет пересечения кодов клиентов между загрузкой и базой.")
                             else:
-                                for metric_name, df_metric in tables.items():
-                                    if df_metric.empty:
-                                        continue
-                                    display = df_metric.copy()
-                                    display.columns = ["Месяц", "Вклад (абс)", "Вклад %"]
-                                    st.subheader(metric_name)
-                                    st.dataframe(display, use_container_width=True)
-                                    fig = px.pie(
-                                        df_metric,
-                                        values="value",
-                                        names="month_label",
-                                        title=f"Вклад по реценси — {metric_name}",
-                                    )
-                                    fig.update_traces(textposition="inside", textinfo="percent+label")
-                                    st.plotly_chart(fig, use_container_width=True)
+                                work = df_upload if category_filter is None else df_upload[df_upload["Группа1"].astype(str).str.strip() == str(category_filter).strip()]
+                                upload_totals = {
+                                    "Продажи": float(work["Продажи"].sum()),
+                                    "Чеки": float(work["Количество чеков"].sum()),
+                                    "Товар в шт.": float(work["Количество товар"].sum()),
+                                    "Клиенты": int(work["Код клиента"].nunique()),
+                                }
+                                st.session_state["contribution_tables"] = tables
+                                st.session_state["upload_totals"] = upload_totals
+
+                if "contribution_tables" in st.session_state and "upload_totals" in st.session_state:
+                    tables = st.session_state["contribution_tables"]
+                    upload_totals = st.session_state["upload_totals"]
+                    tab_names = ["Вклад в выручку", "Вклад в чеки", "Вклад в товар", "Вклад клиентов"]
+                    metric_keys = ["Продажи", "Чеки", "Товар в шт.", "Клиенты"]
+                    tabs = st.tabs(tab_names)
+                    for tab, metric_key in zip(tabs, metric_keys):
+                        df_metric = tables.get(metric_key)
+                        if df_metric is None or df_metric.empty:
+                            with tab:
+                                st.info("Нет данных по этой метрике.")
+                            continue
+                        with tab:
+                            col_table, col_chart = st.columns([1, 1.4])
+                            with col_table:
+                                display = df_metric.copy()
+                                display["pct"] = display["pct"].apply(lambda x: f"{x} %")
+                                display = display.rename(columns={"month_label": "Месяц", "value": "Вклад (абс)", "pct": "Вклад %"})
+                                total_value = df_metric["value"].sum()
+                                display = pd.concat([
+                                    display[["Месяц", "Вклад (абс)", "Вклад %"]],
+                                    pd.DataFrame([{"Месяц": "Итого", "Вклад (абс)": total_value, "Вклад %": "100 %"}])
+                                ], ignore_index=True)
+                                st.dataframe(display, use_container_width=True, hide_index=True)
+                            with col_chart:
+                                fig = go.Figure(data=[go.Pie(
+                                    labels=df_metric["month_label"],
+                                    values=df_metric["value"],
+                                    hole=0.6,
+                                    textinfo="label+percent",
+                                    textposition="outside",
+                                    showlegend=True,
+                                    legend=dict(orientation="v", yanchor="middle", y=0.5, x=1.02),
+                                )])
+                                total_str = f"{upload_totals[metric_key]:,.0f}".replace(",", " ")
+                                fig.add_annotation(
+                                    text=total_str,
+                                    x=0.5, y=0.5, showarrow=False,
+                                    font=dict(size=24, color="gray"),
+                                )
+                                fig.update_layout(
+                                    title=f"Вклад по реценси — {metric_key}",
+                                    height=500,
+                                    margin=dict(t=50, b=30, l=10, r=180),
+                                )
+                                st.plotly_chart(fig, use_container_width=True)
     else:
         st.info(
             "Загрузите файл с колонками: Группа1, Продажи, Количество чеков, Количество товар, Код клиента."
