@@ -5,7 +5,7 @@
 """
 
 from pathlib import Path
-from typing import Literal, Optional
+from typing import Dict, Literal, Optional
 
 import pandas as pd
 
@@ -115,7 +115,7 @@ def contribution_tables_from_upload(
     df_upload: pd.DataFrame,
     df_last_purchase: pd.DataFrame,
     category_filter: Optional[str] = None,
-) -> dict[str, pd.DataFrame]:
+) -> Dict[str, pd.DataFrame]:
     """
     Строит 4 таблицы вклада по реценси для метрик: Продажи, Чеки, Товар в шт., Клиенты.
     Загружаемый документ должен содержать: Группа1, Продажи, Количество чеков, Количество товар, Код клиента.

@@ -4,7 +4,11 @@ Recency Contribution Matrix — Streamlit.
 Режим «база + загрузка»: загрузка файла с выручкой/штуками → круговая по реценси.
 """
 
+import sys
 from pathlib import Path
+
+# Чтобы импорт src работал при запуске из корня репозитория (Streamlit Cloud и др.)
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import pandas as pd
 import streamlit as st
