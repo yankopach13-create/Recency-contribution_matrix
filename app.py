@@ -19,6 +19,7 @@ from src.recency_contribution import (
     contribution_from_base,
     contribution_from_upload,
     contribution_tables_from_upload,
+    normalize_upload_columns,
     UPLOAD_REQUIRED_COLUMNS,
 )
 
@@ -70,6 +71,7 @@ else:
             st.error(f"Ошибка чтения файла: {e}")
             df_upload = None
         else:
+            df_upload = normalize_upload_columns(df_upload)
             missing = [c for c in UPLOAD_REQUIRED_COLUMNS if c not in df_upload.columns]
             if missing:
                 st.error(f"В файле не хватает колонок: {missing}. Ожидаются: {UPLOAD_REQUIRED_COLUMNS}")

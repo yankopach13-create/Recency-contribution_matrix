@@ -23,6 +23,24 @@ UPLOAD_COL_RECEIPTS = "Количество чеков"
 UPLOAD_COL_ITEMS = "Количество товар"
 UPLOAD_REQUIRED_COLUMNS = [COL_GROUP, UPLOAD_COL_SALES, UPLOAD_COL_RECEIPTS, UPLOAD_COL_ITEMS, COL_CLIENT_CODE]
 
+# Варианты названий колонок в файле (приводятся к каноническим)
+UPLOAD_COL_ALIASES = {
+    "Количество товара": UPLOAD_COL_ITEMS,  # часто в файлах с окончанием "а"
+}
+
+
+def normalize_upload_columns(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Убирает пробелы в названиях колонок и переименовывает известные варианты
+    (например «Количество товара») в канонические имена.
+    """
+    out = df.copy()
+    out.columns = out.columns.astype(str).str.strip()
+    for alias, canonical in UPLOAD_COL_ALIASES.items():
+        if alias in out.columns and canonical not in out.columns:
+            out = out.rename(columns={alias: canonical})
+    return out
+
 # Имена месяцев для подписи на диаграмме (русская локаль)
 MONTH_NAMES = {
     1: "Январь", 2: "Февраль", 3: "Март", 4: "Апрель", 5: "Май", 6: "Июнь",
