@@ -11,7 +11,12 @@ import streamlit as st
 import plotly.express as px
 
 from src.load_base import get_last_purchase_table
-from src.recency_contribution import contribution_from_base, contribution_from_upload
+from src.recency_contribution import (
+    contribution_from_base,
+    contribution_from_upload,
+    contribution_tables_from_upload,
+    UPLOAD_REQUIRED_COLUMNS,
+)
 
 BASE_DIR = Path(__file__).resolve().parent / "base"
 
@@ -47,7 +52,10 @@ if use_upload == "Только база (base)":
             st.plotly_chart(fig, use_container_width=True)
 
 else:
-    uploaded = st.file_uploader("Загрузите файл (Excel или CSV) с кодами клиентов и метрикой", type=["xlsx", "xls", "csv"])
+    uploaded = st.file_uploader(
+        "Загрузите файл (Excel или CSV) с колонками: Группа1, Продажи, Количество чеков, Количество товар, Код клиента",
+        type=["xlsx", "xls", "csv"],
+    )
     if uploaded is not None:
         try:
             if uploaded.name.endswith(".csv"):
@@ -58,33 +66,45 @@ else:
             st.error(f"Ошибка чтения файла: {e}")
             df_upload = None
         else:
-            st.caption("Колонки в файле:")
-            st.write(list(df_upload.columns))
-            client_col = st.selectbox("Колонка с кодом клиента", options=df_upload.columns.tolist())
-            value_col = st.selectbox("Колонка для вклада (выручка / штуки)", options=df_upload.columns.tolist())
-            if st.button("Построить диаграмму по загрузке"):
-                with st.spinner("Загружаю реценси из base и считаю вклад..."):
-                    df_last = get_last_purchase_table(BASE_DIR)
-                    if df_last.empty:
-                        st.warning("База (base) пуста или не найдена. Сначала добавьте Excel-файлы в base.")
-                    else:
-                        df = contribution_from_upload(
-                            df_upload,
-                            df_last,
-                            value_column=value_col,
-                            client_code_column=client_col,
-                        )
-                        if df.empty:
-                            st.warning("Нет пересечения кодов клиентов между загрузкой и базой.")
+            missing = [c for c in UPLOAD_REQUIRED_COLUMNS if c not in df_upload.columns]
+            if missing:
+                st.error(f"В файле не хватает колонок: {missing}. Ожидаются: {UPLOAD_REQUIRED_COLUMNS}")
+            else:
+                categories = ["По всем категориям"] + sorted(df_upload["Группа1"].dropna().astype(str).unique().tolist())
+                choice = st.selectbox("Строить по категориям", options=categories)
+                category_filter = None if choice == "По всем категориям" else choice
+
+                if st.button("Построить диаграммы"):
+                    with st.spinner("Загружаю реценси из base и считаю вклад по 4 метрикам..."):
+                        df_last = get_last_purchase_table(BASE_DIR)
+                        if df_last.empty:
+                            st.warning("База (base) пуста или не найдена. Сначала добавьте Excel-файлы в base.")
                         else:
-                            st.dataframe(df, use_container_width=True)
-                            fig = px.pie(
-                                df,
-                                values="value",
-                                names="month_label",
-                                title=f"Вклад по месяцу последней покупки ({value_col})",
+                            tables = contribution_tables_from_upload(
+                                df_upload,
+                                df_last,
+                                category_filter=category_filter,
                             )
-                            fig.update_traces(textposition="inside", textinfo="percent+label")
-                            st.plotly_chart(fig, use_container_width=True)
+                            has_data = any(not t.empty for t in tables.values())
+                            if not has_data:
+                                st.warning("Нет пересечения кодов клиентов между загрузкой и базой.")
+                            else:
+                                for metric_name, df_metric in tables.items():
+                                    if df_metric.empty:
+                                        continue
+                                    display = df_metric.copy()
+                                    display.columns = ["Месяц", "Вклад (абс)", "Вклад %"]
+                                    st.subheader(metric_name)
+                                    st.dataframe(display, use_container_width=True)
+                                    fig = px.pie(
+                                        df_metric,
+                                        values="value",
+                                        names="month_label",
+                                        title=f"Вклад по реценси — {metric_name}",
+                                    )
+                                    fig.update_traces(textposition="inside", textinfo="percent+label")
+                                    st.plotly_chart(fig, use_container_width=True)
     else:
-        st.info("Загрузите файл с колонками: код клиента, выручка и/или продажи в шт.")
+        st.info(
+            "Загрузите файл с колонками: Группа1, Продажи, Количество чеков, Количество товар, Код клиента."
+        )
