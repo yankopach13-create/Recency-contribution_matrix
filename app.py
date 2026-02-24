@@ -138,7 +138,6 @@ else:
                                     textinfo="label+percent",
                                     textposition="outside",
                                     showlegend=True,
-                                    legend=dict(orientation="v", yanchor="middle", y=0.5, x=1.02),
                                 )])
                                 total_str = f"{upload_totals[metric_key]:,.0f}".replace(",", " ")
                                 fig.add_annotation(
@@ -150,6 +149,7 @@ else:
                                     title=f"Вклад по реценси — {metric_key}",
                                     height=500,
                                     margin=dict(t=50, b=30, l=10, r=180),
+                                    legend=dict(orientation="v", yanchor="middle", y=0.5, x=1.02),
                                 )
                                 st.plotly_chart(fig, use_container_width=True)
     else:
