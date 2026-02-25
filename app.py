@@ -13,12 +13,14 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import pandas as pd
 import streamlit as st
+import streamlit.components.v1 as components
 import plotly.express as px
 import plotly.graph_objects as go
 
 from src.load_base import get_last_purchase_table
 from src.recency_contribution import (
     CATEGORY_COLUMNS,
+    LABEL_NO_BONUS_CARD,
     contribution_from_base,
     contribution_from_upload,
     contribution_tables_from_upload,
@@ -40,36 +42,19 @@ def _fmt_num(x) -> str:
     return s.replace(",", " ")
 
 
-def _table_html(data_rows: list[tuple], total_fmt: str, period_to_clients: dict) -> str:
-    """Одна таблица: закреплённые Итого и заголовки, 4-й столбец — эмодзи-кнопка копирования с hover и анимацией."""
+def _table_html(data_rows: list[tuple], total_fmt: str) -> str:
+    """Таблица на 3 столбца: Месяц, Вклад (ABC), Вклад %. Закреплённые Итого и заголовки."""
     total_fmt = html.escape(total_fmt)
     cell_style = "padding: 8px 12px; border: 1px solid #ccc;"
-    # Кнопка-эмодзи: Clipboard API (async) с fallback на execCommand при ошибке
-    copy_btn_tpl = (
-        '<button type="button" class="copy-emoji-btn" data-codes="{codes_attr}" '
-        'style="cursor:pointer;border:none;background:transparent;font-size:1.1em;padding:4px;'
-        'transition:transform 0.2s ease;" '
-        'onmouseover="this.style.transform=\'scale(1.4)\'" onmouseout="this.style.transform=\'scale(1)\'" '
-        'onclick="(function(){{var btn=this;var t=btn.getAttribute(\'data-codes\');if(!t)return;var s=t.replace(/,/g,\'\\n\');'
-        'function showOk(){{btn.textContent=\'✓\';btn.style.color=\'green\';setTimeout(function(){{btn.textContent=\'📋\';btn.style.color=\'\';}},1500);}}'
-        'function fallback(){{var ta=document.createElement(\'textarea\');ta.value=s;ta.style.position=\'fixed\';ta.style.left=\'-9999px\';'
-        'document.body.appendChild(ta);ta.focus();ta.select();try{{document.execCommand(\'copy\');}}finally{{document.body.removeChild(ta);}}showOk();}}'
-        'if(navigator.clipboard&&navigator.clipboard.writeText){{navigator.clipboard.writeText(s).then(showOk).catch(fallback);}}else{{fallback();}}}}).call(this)">📋</button>'
-    )
     rows_html_parts = []
     for month, abs_val, pct in data_rows:
-        codes = period_to_clients.get(month, [])
-        codes_attr = html.escape(",".join(str(c) for c in codes)) if codes else ""
-        copy_btn = copy_btn_tpl.format(codes_attr=codes_attr)
         rows_html_parts.append(
             f'<tr>'
             f'<td style="{cell_style}">{html.escape(month)}</td>'
             f'<td style="{cell_style} text-align: right;">{html.escape(abs_val)}</td>'
-            f'<td style="{cell_style} text-align: right;">{html.escape(pct)}</td>'
-            f'<td style="{cell_style} text-align: center;">{copy_btn}</td></tr>'
+            f'<td style="{cell_style} text-align: right;">{html.escape(pct)}</td></tr>'
         )
     rows_html = "".join(rows_html_parts)
-    # Закреплённые строки без box-shadow, чтобы не было зазора; вторая строка top = высота первой
     sticky_row1 = "position: sticky; top: 0; z-index: 3; background-color: #e8e8e8; border-bottom: 1px solid #ccc;"
     sticky_row2 = "position: sticky; top: 46px; z-index: 2; background-color: #f5f5f5; border-bottom: 1px solid #ccc;"
     return f"""
@@ -78,22 +63,19 @@ def _table_html(data_rows: list[tuple], total_fmt: str, period_to_clients: dict)
   width: 100%; border-collapse: collapse; table-layout: fixed; font-size: 0.95rem;
 ">
   <colgroup>
-    <col style="width: 25%">
-    <col style="width: 25%">
-    <col style="width: 25%">
-    <col style="width: 25%">
+    <col style="width: 33.33%">
+    <col style="width: 33.33%">
+    <col style="width: 33.34%">
   </colgroup>
   <tr style="font-weight: bold; color: #000; {sticky_row1}">
     <td style="{cell_style} text-align: center; color: #000; height: 46px; vertical-align: middle;">Итого</td>
     <td style="{cell_style} text-align: center; color: #000; vertical-align: middle;">{total_fmt}</td>
     <td style="{cell_style} text-align: center; color: #000; vertical-align: middle;">100 %</td>
-    <td style="{cell_style} text-align: center; color: #000; vertical-align: middle;">—</td>
   </tr>
   <tr style="color: #000; {sticky_row2}">
     <th style="{cell_style} text-align: center; color: #000; vertical-align: middle;">Месяц</th>
     <th style="{cell_style} text-align: center; color: #000; vertical-align: middle;">Вклад (ABC)</th>
     <th style="{cell_style} text-align: center; color: #000; vertical-align: middle;">Вклад %</th>
-    <th style="{cell_style} text-align: center; color: #000; vertical-align: middle;">Скопировать коды клиентов</th>
   </tr>
   <tbody>
     {rows_html}
@@ -101,6 +83,48 @@ def _table_html(data_rows: list[tuple], total_fmt: str, period_to_clients: dict)
 </table>
 </div>
 """
+
+
+def _copy_codes_block_html(text_to_copy: str, block_id: str) -> str:
+    """HTML: скрытый textarea с текстом и кнопка «Скопировать коды» (Clipboard API + fallback)."""
+    escaped = html.escape(text_to_copy)
+    return f'''
+<textarea id="codes_ta_{block_id}" style="position:absolute;left:-9999px;width:1px;height:1px;" readonly>{escaped}</textarea>
+<button type="button" id="copy_btn_{block_id}" style="padding:6px 14px;cursor:pointer;font-size:0.95rem;">
+  Скопировать коды
+</button>
+<script>
+(function() {{
+  var ta = document.getElementById("codes_ta_{block_id}");
+  var btn = document.getElementById("copy_btn_{block_id}");
+  if (!ta || !btn) return;
+  btn.onclick = function() {{
+    var s = ta.value;
+    function showOk() {{
+      btn.textContent = "✓ Скопировано!";
+      btn.style.background = "#d4edda";
+      setTimeout(function() {{ btn.textContent = "Скопировать коды"; btn.style.background = ""; }}, 2000);
+    }}
+    function fallback() {{
+      var t = document.createElement("textarea");
+      t.value = s;
+      t.style.position = "fixed";
+      t.style.left = "-9999px";
+      document.body.appendChild(t);
+      t.focus();
+      t.select();
+      try {{ document.execCommand("copy"); }} finally {{ document.body.removeChild(t); }}
+      showOk();
+    }}
+    if (navigator.clipboard && navigator.clipboard.writeText) {{
+      navigator.clipboard.writeText(s).then(showOk).catch(fallback);
+    }} else {{
+      fallback();
+    }}
+  }};
+}})();
+</script>
+'''
 
 
 st.set_page_config(page_title="Recency Contribution", layout="wide")
@@ -218,7 +242,7 @@ else:
                                     (str(row["month_label"]), row["value_fmt"], row["pct"])
                                     for _, row in data_df.iterrows()
                                 ]
-                                table_markup = _table_html(data_rows, total_fmt, period_to_clients)
+                                table_markup = _table_html(data_rows, total_fmt)
                                 st.markdown(table_markup, unsafe_allow_html=True)
                             with col_chart:
                                 fig = go.Figure(data=[go.Pie(
@@ -244,6 +268,28 @@ else:
                                     uniformtext=dict(minsize=10, mode="hide"),
                                 )
                                 st.plotly_chart(fig, use_container_width=True)
+                            # Под таблицей и диаграммой: выбор месяца и копирование кодов
+                            month_options = [
+                                str(m) for m in df_metric["month_label"]
+                                if str(m) != LABEL_NO_BONUS_CARD
+                            ]
+                            if month_options:
+                                row_sel, row_copy = st.columns([1, 1])
+                                with row_sel:
+                                    sel_key = f"month_sel_{metric_key.replace(' ', '_').replace('.', '_')}"
+                                    selected_month = st.selectbox(
+                                        "Месяц",
+                                        options=month_options,
+                                        key=sel_key,
+                                    )
+                                with row_copy:
+                                    codes = period_to_clients.get(selected_month, [])
+                                    text_to_copy = "\n".join(str(c) for c in codes)
+                                    block_id = sel_key
+                                    copy_html = _copy_codes_block_html(text_to_copy, block_id)
+                                    components.html(copy_html, height=50)
+                            else:
+                                st.caption("Нет периодов для выбора кодов (кроме «Клиенты без БК»).")
     else:
         st.info(
             "Загрузите файл с колонками: Группа1, Продажи, Количество чеков, Количество товар, Код клиента."
