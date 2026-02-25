@@ -61,7 +61,7 @@ def _add_recency_month(df: pd.DataFrame, date_col: str = "last_purchase_date") -
     quarter = (month - 1) // 3 + 1
     out["period_label"] = np.where(
         year == 2024,
-        "Q" + quarter.astype(str) + " " + year.astype(str),
+        "C" + quarter.astype(str) + " " + year.astype(str),
         out["month_label"],
     )
     return out

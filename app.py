@@ -4,6 +4,7 @@ Recency Contribution Matrix — Streamlit.
 Режим «база + загрузка»: загрузка файла с выручкой/штуками → круговая по реценси.
 """
 
+import html
 import sys
 from pathlib import Path
 
@@ -35,6 +36,49 @@ def _fmt_num(x) -> str:
         x = int(x)
     s = f"{x:,.2f}" if isinstance(x, float) and x != int(x) else f"{int(x):,}"
     return s.replace(",", " ")
+
+
+def _table_html(data_rows: list[tuple], total_fmt: str) -> str:
+    """Строит HTML: блок «Итого» над таблицей, таблица по вертикали на всю высоту контейнера."""
+    total_fmt = html.escape(total_fmt)
+    rows_html = "".join(
+        f'<tr><td style="padding: 6px 12px; border: 1px solid #ccc;">{html.escape(month)}</td>'
+        f'<td style="padding: 6px 12px; border: 1px solid #ccc; text-align: right;">{html.escape(abs_val)}</td>'
+        f'<td style="padding: 6px 12px; border: 1px solid #ccc; text-align: right;">{html.escape(pct)}</td></tr>'
+        for month, abs_val, pct in data_rows
+    )
+    return f"""
+<div class="contribution-table-wrap" style="
+  display: flex; flex-direction: column; min-height: 65vh; height: 65vh; overflow: hidden;
+">
+  <table class="contribution-total-row" style="
+    width: 100%; border-collapse: collapse; flex-shrink: 0;
+    font-weight: bold; background-color: #e8e8e8; margin-bottom: 0;
+  ">
+    <tr>
+      <td style="padding: 8px 12px; border: 1px solid #ccc;">Итого</td>
+      <td style="padding: 8px 12px; border: 1px solid #ccc;">{total_fmt}</td>
+      <td style="padding: 8px 12px; border: 1px solid #ccc;">100 %</td>
+    </tr>
+  </table>
+  <div style="flex: 1; overflow-y: auto; overflow-x: hidden;">
+    <table class="contribution-data-table" style="
+      width: 100%; border-collapse: collapse; font-size: 0.95rem;
+    ">
+      <thead>
+        <tr style="background-color: #f5f5f5;">
+          <th style="padding: 8px 12px; border: 1px solid #ccc; text-align: left;">Месяц</th>
+          <th style="padding: 8px 12px; border: 1px solid #ccc; text-align: right;">Вклад (абс)</th>
+          <th style="padding: 8px 12px; border: 1px solid #ccc; text-align: right;">Вклад %</th>
+        </tr>
+      </thead>
+      <tbody>
+        {rows_html}
+      </tbody>
+    </table>
+  </div>
+</div>
+"""
 
 
 st.set_page_config(page_title="Recency Contribution", layout="wide")
@@ -132,16 +176,17 @@ else:
                         with tab:
                             col_table, col_chart = st.columns([1, 1.4])
                             with col_table:
-                                display = df_metric.copy()
-                                display["pct"] = display["pct"].apply(lambda x: f"{x} %")
-                                display = display.rename(columns={"month_label": "Месяц", "value": "Вклад (абс)", "pct": "Вклад %"})
                                 total_value = df_metric["value"].sum()
-                                total_row = pd.DataFrame([{"Месяц": "Итого", "Вклад (абс)": total_value, "Вклад %": "100 %"}])
-                                display = pd.concat([total_row, display[["Месяц", "Вклад (абс)", "Вклад %"]]], ignore_index=True)
-                                display["Вклад (абс)"] = display["Вклад (абс)"].apply(lambda x: _fmt_num(x) if isinstance(x, (int, float)) else x)
-                                def _highlight_total(row):
-                                    return ["font-weight: bold; background-color: #e8e8e8"] * len(row) if row["Месяц"] == "Итого" else [""] * len(row)
-                                st.dataframe(display.style.apply(_highlight_total, axis=1), use_container_width=True, hide_index=True)
+                                total_fmt = _fmt_num(total_value)
+                                data_df = df_metric.copy()
+                                data_df["pct"] = data_df["pct"].apply(lambda x: f"{x} %")
+                                data_df["value_fmt"] = data_df["value"].apply(_fmt_num)
+                                data_rows = [
+                                    (str(row["month_label"]), row["value_fmt"], row["pct"])
+                                    for _, row in data_df.iterrows()
+                                ]
+                                table_markup = _table_html(data_rows, total_fmt)
+                                st.markdown(table_markup, unsafe_allow_html=True)
                             with col_chart:
                                 fig = go.Figure(data=[go.Pie(
                                     labels=df_metric["month_label"],
