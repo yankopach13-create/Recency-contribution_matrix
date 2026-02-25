@@ -44,17 +44,17 @@ def _table_html(data_rows: list[tuple], total_fmt: str, period_to_clients: dict)
     """Одна таблица: закреплённые Итого и заголовки, 4-й столбец — эмодзи-кнопка копирования с hover и анимацией."""
     total_fmt = html.escape(total_fmt)
     cell_style = "padding: 8px 12px; border: 1px solid #ccc;"
-    # Кнопка-эмодзи: копирование с fallback (Clipboard API → execCommand), hover и ✓ после копирования
+    # Кнопка-эмодзи: Clipboard API (async) с fallback на execCommand при ошибке
     copy_btn_tpl = (
         '<button type="button" class="copy-emoji-btn" data-codes="{codes_attr}" '
         'style="cursor:pointer;border:none;background:transparent;font-size:1.1em;padding:4px;'
         'transition:transform 0.2s ease;" '
         'onmouseover="this.style.transform=\'scale(1.4)\'" onmouseout="this.style.transform=\'scale(1)\'" '
-        'onclick="(function(){{var t=this.getAttribute(\'data-codes\');if(!t)return;var s=t.replace(/,/g,\'\\n\');'
-        'try{{navigator.clipboard.writeText(s);}}catch(e){{var ta=document.createElement(\'textarea\');ta.value=s;'
-        'ta.style.position=\'fixed\';ta.style.left=\'-9999px\';document.body.appendChild(ta);ta.focus();ta.select();'
-        'try{{document.execCommand(\'copy\');}}finally{{document.body.removeChild(ta);}}}} '
-        'this.textContent=\'✓\';this.style.color=\'green\';var b=this;setTimeout(function(){{b.textContent=\'📋\';b.style.color=\'\';}},1500);}}).call(this)">📋</button>'
+        'onclick="(function(){{var btn=this;var t=btn.getAttribute(\'data-codes\');if(!t)return;var s=t.replace(/,/g,\'\\n\');'
+        'function showOk(){{btn.textContent=\'✓\';btn.style.color=\'green\';setTimeout(function(){{btn.textContent=\'📋\';btn.style.color=\'\';}},1500);}}'
+        'function fallback(){{var ta=document.createElement(\'textarea\');ta.value=s;ta.style.position=\'fixed\';ta.style.left=\'-9999px\';'
+        'document.body.appendChild(ta);ta.focus();ta.select();try{{document.execCommand(\'copy\');}}finally{{document.body.removeChild(ta);}}showOk();}}'
+        'if(navigator.clipboard&&navigator.clipboard.writeText){{navigator.clipboard.writeText(s).then(showOk).catch(fallback);}}else{{fallback();}}}}).call(this)">📋</button>'
     )
     rows_html_parts = []
     for month, abs_val, pct in data_rows:
