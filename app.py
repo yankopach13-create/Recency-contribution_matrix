@@ -301,7 +301,7 @@ else:
                                 text_to_copy = "\n".join(_fmt_code(c) for c in codes)
                                 block_id = sel_key
                                 copy_html = _copy_codes_block_html(text_to_copy, block_id)
-                                    components.html(copy_html, height=52)
+                                components.html(copy_html, height=52)
                             else:
                                 st.caption("Нет периодов для выбора кодов (кроме «Клиенты без БК»).")
     else:
