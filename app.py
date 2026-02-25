@@ -38,40 +38,56 @@ def _fmt_num(x) -> str:
     return s.replace(",", " ")
 
 
-def _table_html(data_rows: list[tuple], total_fmt: str) -> str:
-    """Одна таблица: строка Итого, заголовки и данные; столбцы одной ширины, итого и заголовки по центру."""
+def _table_html(data_rows: list[tuple], total_fmt: str, period_to_clients: dict) -> str:
+    """Одна таблица: Итого, заголовки, данные; 4-й столбец — кнопка «Скопировать коды»; скролл по вертикали."""
     total_fmt = html.escape(total_fmt)
     cell_style = "padding: 8px 12px; border: 1px solid #ccc;"
-    rows_html = "".join(
-        f'<tr>'
-        f'<td style="{cell_style}">{html.escape(month)}</td>'
-        f'<td style="{cell_style} text-align: right;">{html.escape(abs_val)}</td>'
-        f'<td style="{cell_style} text-align: right;">{html.escape(pct)}</td></tr>'
-        for month, abs_val, pct in data_rows
-    )
+    btn_style = "padding: 6px 10px; cursor: pointer; font-size: 0.85rem; white-space: nowrap;"
+    rows_html_parts = []
+    for month, abs_val, pct in data_rows:
+        codes = period_to_clients.get(month, [])
+        codes_attr = html.escape(",".join(str(c) for c in codes)) if codes else ""
+        copy_btn = (
+            f'<button type="button" style="{btn_style}" class="copy-codes-btn" '
+            f'data-codes="{codes_attr}" onclick="var t=this.getAttribute(\'data-codes\'); '
+            f'if(t) navigator.clipboard.writeText(t.replace(/,/g,\'\\n\'));">Скопировать</button>'
+        )
+        rows_html_parts.append(
+            f'<tr>'
+            f'<td style="{cell_style}">{html.escape(month)}</td>'
+            f'<td style="{cell_style} text-align: right;">{html.escape(abs_val)}</td>'
+            f'<td style="{cell_style} text-align: right;">{html.escape(pct)}</td>'
+            f'<td style="{cell_style} text-align: center;">{copy_btn}</td></tr>'
+        )
+    rows_html = "".join(rows_html_parts)
     return f"""
+<div style="height: 65vh; overflow-y: auto; overflow-x: hidden;">
 <table class="contribution-table-wrap" style="
   width: 100%; border-collapse: collapse; table-layout: fixed; font-size: 0.95rem;
 ">
   <colgroup>
-    <col style="width: 33.33%">
-    <col style="width: 33.33%">
-    <col style="width: 33.34%">
+    <col style="width: 25%">
+    <col style="width: 25%">
+    <col style="width: 25%">
+    <col style="width: 25%">
   </colgroup>
   <tr style="font-weight: bold; background-color: #e8e8e8; color: #000;">
     <td style="{cell_style} text-align: center; color: #000;">Итого</td>
     <td style="{cell_style} text-align: center; color: #000;">{total_fmt}</td>
     <td style="{cell_style} text-align: center; color: #000;">100 %</td>
+    <td style="{cell_style} text-align: center; color: #000;">—</td>
   </tr>
   <tr style="background-color: #f5f5f5; color: #000;">
     <th style="{cell_style} text-align: center; color: #000;">Месяц</th>
-    <th style="{cell_style} text-align: center; color: #000;">Вклад (абс)</th>
+    <th style="{cell_style} text-align: center; color: #000;">Вклад (ABC)</th>
     <th style="{cell_style} text-align: center; color: #000;">Вклад %</th>
+    <th style="{cell_style} text-align: center; color: #000;">Скопировать коды клиентов</th>
   </tr>
   <tbody>
     {rows_html}
   </tbody>
 </table>
+</div>
 """
 
 
@@ -136,7 +152,7 @@ else:
                         if df_last.empty:
                             st.warning("База (base) пуста или не найдена. Сначала добавьте Excel-файлы в base.")
                         else:
-                            tables = contribution_tables_from_upload(
+                            tables, period_to_clients = contribution_tables_from_upload(
                                 df_upload,
                                 df_last,
                                 category_filter=category_filter,
@@ -154,10 +170,12 @@ else:
                                 }
                                 st.session_state["contribution_tables"] = tables
                                 st.session_state["upload_totals"] = upload_totals
+                                st.session_state["period_to_clients"] = period_to_clients
 
-                if "contribution_tables" in st.session_state and "upload_totals" in st.session_state:
+                if "contribution_tables" in st.session_state and "upload_totals" in st.session_state and "period_to_clients" in st.session_state:
                     tables = st.session_state["contribution_tables"]
                     upload_totals = st.session_state["upload_totals"]
+                    period_to_clients = st.session_state["period_to_clients"]
                     tab_names = ["Вклад в выручку", "Вклад в чеки", "Вклад в товар", "Вклад клиентов"]
                     metric_keys = ["Продажи", "Чеки", "Товар в шт.", "Клиенты"]
                     tabs = st.tabs(tab_names)
@@ -179,7 +197,7 @@ else:
                                     (str(row["month_label"]), row["value_fmt"], row["pct"])
                                     for _, row in data_df.iterrows()
                                 ]
-                                table_markup = _table_html(data_rows, total_fmt)
+                                table_markup = _table_html(data_rows, total_fmt, period_to_clients)
                                 st.markdown(table_markup, unsafe_allow_html=True)
                             with col_chart:
                                 fig = go.Figure(data=[go.Pie(

@@ -5,7 +5,7 @@
 """
 
 from pathlib import Path
-from typing import Dict, Literal, Optional
+from typing import Dict, List, Literal, Optional, Tuple
 
 import numpy as np
 import pandas as pd
@@ -142,7 +142,7 @@ def contribution_tables_from_upload(
     df_upload: pd.DataFrame,
     df_last_purchase: pd.DataFrame,
     category_filter: Optional[str] = None,
-) -> Dict[str, pd.DataFrame]:
+) -> Tuple[Dict[str, pd.DataFrame], Dict[str, List[str]]]:
     """
     Строит 4 таблицы вклада по реценси для метрик: Продажи, Чеки, Товар в шт., Клиенты.
     Загружаемый документ должен содержать: Группа1, Продажи, Количество чеков, Количество товар, Код клиента.
@@ -150,19 +150,17 @@ def contribution_tables_from_upload(
     Возвращает словарь { "Продажи": df, "Чеки": df, "Товар в шт.": df, "Клиенты": df },
     каждый df: month_label, value (абсолютный вклад), pct (доля %).
     """
+    empty_tables = {"Продажи": pd.DataFrame(columns=["month_label", "value", "pct"]).copy(), "Чеки": pd.DataFrame(columns=["month_label", "value", "pct"]).copy(), "Товар в шт.": pd.DataFrame(columns=["month_label", "value", "pct"]).copy(), "Клиенты": pd.DataFrame(columns=["month_label", "value", "pct"]).copy()}
     if df_upload.empty or df_last_purchase.empty:
-        empty = pd.DataFrame(columns=["month_label", "value", "pct"])
-        return {"Продажи": empty.copy(), "Чеки": empty.copy(), "Товар в шт.": empty.copy(), "Клиенты": empty.copy()}
+        return (empty_tables, {})
     if not all(c in df_upload.columns for c in UPLOAD_REQUIRED_COLUMNS):
-        empty = pd.DataFrame(columns=["month_label", "value", "pct"])
-        return {"Продажи": empty.copy(), "Чеки": empty.copy(), "Товар в шт.": empty.copy(), "Клиенты": empty.copy()}
+        return (empty_tables, {})
 
     work = df_upload.copy()
     if category_filter is not None:
         work = work[work[COL_GROUP].astype(str).str.strip() == str(category_filter).strip()]
     if work.empty:
-        empty = pd.DataFrame(columns=["month_label", "value", "pct"])
-        return {"Продажи": empty.copy(), "Чеки": empty.copy(), "Товар в шт.": empty.copy(), "Клиенты": empty.copy()}
+        return (empty_tables, {})
 
     df_last = _add_recency_month(df_last_purchase)
     merged = work.merge(
@@ -171,8 +169,7 @@ def contribution_tables_from_upload(
         how="inner",
     )
     if merged.empty:
-        empty = pd.DataFrame(columns=["month_label", "value", "pct"])
-        return {"Продажи": empty.copy(), "Чеки": empty.copy(), "Товар в шт.": empty.copy(), "Клиенты": empty.copy()}
+        return (empty_tables, {})
 
     def _table_for_metric(metric_col: str, agg: Literal["sum", "nunique"]) -> pd.DataFrame:
         if agg == "sum":
@@ -185,9 +182,13 @@ def contribution_tables_from_upload(
         by_period["pct"] = (by_period["value"] / total * 100).round(1) if total else 0
         return by_period.sort_values("value", ascending=False).reset_index(drop=True)
 
-    return {
+    period_to_clients = merged.groupby("period_label")[COL_CLIENT_CODE].apply(
+        lambda s: [str(x) for x in s.unique().tolist()]
+    ).to_dict()
+    tables = {
         "Продажи": _table_for_metric(UPLOAD_COL_SALES, "sum"),
         "Чеки": _table_for_metric(UPLOAD_COL_RECEIPTS, "sum"),
         "Товар в шт.": _table_for_metric(UPLOAD_COL_ITEMS, "sum"),
         "Клиенты": _table_for_metric(COL_CLIENT_CODE, "nunique"),
     }
+    return (tables, period_to_clients)
