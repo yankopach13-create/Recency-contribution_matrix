@@ -64,10 +64,11 @@ def _table_html(data_rows: list[tuple], total_fmt: str, period_to_clients: dict)
             f'<td style="{cell_style} text-align: center;">{copy_btn}</td></tr>'
         )
     rows_html = "".join(rows_html_parts)
-    sticky_row1 = "position: sticky; top: 0; z-index: 3; background-color: #e8e8e8; box-shadow: 0 2px 4px rgba(0,0,0,0.08);"
-    sticky_row2 = "position: sticky; top: 48px; z-index: 2; background-color: #f5f5f5; box-shadow: 0 2px 4px rgba(0,0,0,0.06);"
+    # Закреплённые строки без box-shadow, чтобы не было зазора; вторая строка top = высота первой
+    sticky_row1 = "position: sticky; top: 0; z-index: 3; background-color: #e8e8e8; border-bottom: 1px solid #ccc;"
+    sticky_row2 = "position: sticky; top: 46px; z-index: 2; background-color: #f5f5f5; border-bottom: 1px solid #ccc;"
     return f"""
-<div style="height: 65vh; overflow-y: auto; overflow-x: hidden;">
+<div style="height: 75vh; overflow-y: auto; overflow-x: hidden; border: 1px solid #ccc; border-bottom: 2px solid #ccc; box-sizing: border-box;">
 <table class="contribution-table-wrap" style="
   width: 100%; border-collapse: collapse; table-layout: fixed; font-size: 0.95rem;
 ">
@@ -78,16 +79,16 @@ def _table_html(data_rows: list[tuple], total_fmt: str, period_to_clients: dict)
     <col style="width: 25%">
   </colgroup>
   <tr style="font-weight: bold; color: #000; {sticky_row1}">
-    <td style="{cell_style} text-align: center; color: #000;">Итого</td>
-    <td style="{cell_style} text-align: center; color: #000;">{total_fmt}</td>
-    <td style="{cell_style} text-align: center; color: #000;">100 %</td>
-    <td style="{cell_style} text-align: center; color: #000;">—</td>
+    <td style="{cell_style} text-align: center; color: #000; height: 46px; vertical-align: middle;">Итого</td>
+    <td style="{cell_style} text-align: center; color: #000; vertical-align: middle;">{total_fmt}</td>
+    <td style="{cell_style} text-align: center; color: #000; vertical-align: middle;">100 %</td>
+    <td style="{cell_style} text-align: center; color: #000; vertical-align: middle;">—</td>
   </tr>
   <tr style="color: #000; {sticky_row2}">
-    <th style="{cell_style} text-align: center; color: #000;">Месяц</th>
-    <th style="{cell_style} text-align: center; color: #000;">Вклад (ABC)</th>
-    <th style="{cell_style} text-align: center; color: #000;">Вклад %</th>
-    <th style="{cell_style} text-align: center; color: #000;">Скопировать коды клиентов</th>
+    <th style="{cell_style} text-align: center; color: #000; vertical-align: middle;">Месяц</th>
+    <th style="{cell_style} text-align: center; color: #000; vertical-align: middle;">Вклад (ABC)</th>
+    <th style="{cell_style} text-align: center; color: #000; vertical-align: middle;">Вклад %</th>
+    <th style="{cell_style} text-align: center; color: #000; vertical-align: middle;">Скопировать коды клиентов</th>
   </tr>
   <tbody>
     {rows_html}
