@@ -86,24 +86,25 @@ def _table_html(data_rows: list[tuple], total_fmt: str) -> str:
 
 
 def _copy_codes_block_html(text_to_copy: str, block_id: str) -> str:
-    """HTML: скрытый textarea с текстом и кнопка «Скопировать коды» (Clipboard API + fallback)."""
+    """HTML: скрытый textarea и кнопка в стиле скриншота (не белая), эмодзи список."""
     escaped = html.escape(text_to_copy)
     return f'''
 <textarea id="codes_ta_{block_id}" style="position:absolute;left:-9999px;width:1px;height:1px;" readonly>{escaped}</textarea>
-<button type="button" id="copy_btn_{block_id}" style="padding:8px 20px;cursor:pointer;font-size:0.95rem;min-width:220px;width:100%;">
-  Скопировать коды
+<button type="button" id="copy_btn_{block_id}" style="padding:8px 20px;cursor:pointer;font-size:0.95rem;min-width:220px;width:100%;background:#e8e8e8;border:1px solid #ccc;border-radius:8px;box-shadow:0 1px 3px rgba(0,0,0,0.08);color:#333;">
+  📋 Скопировать коды
 </button>
 <script>
 (function() {{
   var ta = document.getElementById("codes_ta_{block_id}");
   var btn = document.getElementById("copy_btn_{block_id}");
   if (!ta || !btn) return;
+  var defaultLabel = "📋 Скопировать коды";
   btn.onclick = function() {{
     var s = ta.value;
     function showOk() {{
-      btn.textContent = "✓ Скопировано!";
+      btn.innerHTML = "✓ Скопировано!";
       btn.style.background = "#d4edda";
-      setTimeout(function() {{ btn.textContent = "Скопировать коды"; btn.style.background = ""; }}, 2000);
+      setTimeout(function() {{ btn.innerHTML = defaultLabel; btn.style.background = "#e8e8e8"; }}, 2000);
     }}
     function fallback() {{
       var t = document.createElement("textarea");
@@ -270,7 +271,7 @@ else:
                                 st.plotly_chart(fig, use_container_width=True)
                             # Ниже: блок «Коды клиентов» — выбор периода и кнопка копирования
                             st.markdown("---")
-                            st.subheader("📋 Коды клиентов")
+                            st.subheader("👥 Коды клиентов")
                             month_options = [
                                 str(m) for m in df_metric["month_label"]
                                 if str(m) != LABEL_NO_BONUS_CARD
@@ -287,7 +288,13 @@ else:
                                     )
                                 with row_copy:
                                     codes = period_to_clients.get(selected_month, [])
-                                    text_to_copy = "\n".join(str(c) for c in codes)
+                                    def _fmt_code(c):
+                                        try:
+                                            f = float(c)
+                                            return str(int(f)) if f == int(f) else str(c)
+                                        except (ValueError, TypeError):
+                                            return str(c)
+                                    text_to_copy = "\n".join(_fmt_code(c) for c in codes)
                                     block_id = sel_key
                                     copy_html = _copy_codes_block_html(text_to_copy, block_id)
                                     components.html(copy_html, height=50)
