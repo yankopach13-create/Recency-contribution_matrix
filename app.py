@@ -39,7 +39,7 @@ def _fmt_num(x) -> str:
 
 
 def _table_html(data_rows: list[tuple], total_fmt: str) -> str:
-    """Строит HTML: блок «Итого» над таблицей, таблица по вертикали на всю высоту контейнера."""
+    """Строит HTML: блок «Итого» над таблицей, таблица развёрнута по вертикали без скролла."""
     total_fmt = html.escape(total_fmt)
     rows_html = "".join(
         f'<tr><td style="padding: 6px 12px; border: 1px solid #ccc;">{html.escape(month)}</td>'
@@ -48,35 +48,31 @@ def _table_html(data_rows: list[tuple], total_fmt: str) -> str:
         for month, abs_val, pct in data_rows
     )
     return f"""
-<div class="contribution-table-wrap" style="
-  display: flex; flex-direction: column; min-height: 65vh; height: 65vh; overflow: hidden;
-">
+<div class="contribution-table-wrap" style="display: flex; flex-direction: column;">
   <table class="contribution-total-row" style="
-    width: 100%; border-collapse: collapse; flex-shrink: 0;
-    font-weight: bold; background-color: #e8e8e8; margin-bottom: 0;
+    width: 100%; border-collapse: collapse;
+    font-weight: bold; background-color: #e8e8e8; color: #000;
   ">
     <tr>
-      <td style="padding: 8px 12px; border: 1px solid #ccc;">Итого</td>
-      <td style="padding: 8px 12px; border: 1px solid #ccc;">{total_fmt}</td>
-      <td style="padding: 8px 12px; border: 1px solid #ccc;">100 %</td>
+      <td style="padding: 8px 12px; border: 1px solid #ccc; color: #000;">Итого</td>
+      <td style="padding: 8px 12px; border: 1px solid #ccc; color: #000;">{total_fmt}</td>
+      <td style="padding: 8px 12px; border: 1px solid #ccc; color: #000;">100 %</td>
     </tr>
   </table>
-  <div style="flex: 1; overflow-y: auto; overflow-x: hidden;">
-    <table class="contribution-data-table" style="
-      width: 100%; border-collapse: collapse; font-size: 0.95rem;
-    ">
-      <thead>
-        <tr style="background-color: #f5f5f5;">
-          <th style="padding: 8px 12px; border: 1px solid #ccc; text-align: left;">Месяц</th>
-          <th style="padding: 8px 12px; border: 1px solid #ccc; text-align: right;">Вклад (абс)</th>
-          <th style="padding: 8px 12px; border: 1px solid #ccc; text-align: right;">Вклад %</th>
-        </tr>
-      </thead>
-      <tbody>
-        {rows_html}
-      </tbody>
-    </table>
-  </div>
+  <table class="contribution-data-table" style="
+    width: 100%; border-collapse: collapse; font-size: 0.95rem;
+  ">
+    <thead>
+      <tr style="background-color: #f5f5f5; color: #000;">
+        <th style="padding: 8px 12px; border: 1px solid #ccc; text-align: left; color: #000;">Месяц</th>
+        <th style="padding: 8px 12px; border: 1px solid #ccc; text-align: right; color: #000;">Вклад (абс)</th>
+        <th style="padding: 8px 12px; border: 1px solid #ccc; text-align: right; color: #000;">Вклад %</th>
+      </tr>
+    </thead>
+    <tbody>
+      {rows_html}
+    </tbody>
+  </table>
 </div>
 """
 
