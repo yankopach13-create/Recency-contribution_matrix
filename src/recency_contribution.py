@@ -5,7 +5,7 @@
 """
 
 from pathlib import Path
-from typing import Dict, List, Literal, Optional, Tuple
+from typing import Dict, List, Literal, Optional, Tuple, Union
 
 import numpy as np
 import pandas as pd
@@ -32,6 +32,9 @@ UPLOAD_COL_ALIASES = {
 # Специальные строки в таблице вклада
 LABEL_NO_BONUS_CARD = "Клиенты без БК"
 LABEL_NEW_CLIENTS = "Новые клиенты"
+
+# Столбцы загружаемого документа, по которым можно фильтровать категории (мультиотбор)
+CATEGORY_COLUMNS = ["Группа1", "Группа2", "Группа3", "Группа4", "Товар"]
 
 
 def normalize_upload_columns(df: pd.DataFrame) -> pd.DataFrame:
@@ -142,14 +145,29 @@ def contribution_from_upload(
     return by_month.sort_values("value", ascending=False).reset_index(drop=True)
 
 
+def _filter_by_categories(df: pd.DataFrame, selected: List[str]) -> pd.DataFrame:
+    """Оставляет строки, у которых хотя бы в одном из столбцов CATEGORY_COLUMNS значение входит в selected."""
+    if not selected:
+        return df
+    selected_set = {s.strip() for s in selected}
+    cols = [c for c in CATEGORY_COLUMNS if c in df.columns]
+    if not cols:
+        return df
+    mask = pd.Series(False, index=df.index)
+    for col in cols:
+        mask |= df[col].astype(str).str.strip().isin(selected_set)
+    return df[mask].copy()
+
+
 def contribution_tables_from_upload(
     df_upload: pd.DataFrame,
     df_last_purchase: pd.DataFrame,
-    category_filter: Optional[str] = None,
+    category_filter: Optional[Union[str, List[str]]] = None,
 ) -> Tuple[Dict[str, pd.DataFrame], Dict[str, List[str]]]:
     """
     Строит 4 таблицы вклада по реценси для метрик: Продажи, Чеки, Товар в шт., Клиенты.
-    Учитывает: реценси из базы, «Клиенты без БК» (пустой код клиента), «Новые клиенты» (код не в базе).
+    Учитывает: реценси из базы, «Клиенты без БК», «Новые клиенты».
+    category_filter: одна категория (строка), список категорий (мультиотбор по Группа1/2/3/4, Товар) или None — по всем.
     """
     empty_df = pd.DataFrame(columns=["month_label", "value", "pct"])
     empty_tables = {
@@ -165,7 +183,10 @@ def contribution_tables_from_upload(
 
     work = df_upload.copy()
     if category_filter is not None:
-        work = work[work[COL_GROUP].astype(str).str.strip() == str(category_filter).strip()]
+        if isinstance(category_filter, list):
+            work = _filter_by_categories(work, category_filter)
+        else:
+            work = work[work[COL_GROUP].astype(str).str.strip() == str(category_filter).strip()]
     if work.empty:
         return (empty_tables, {})
 

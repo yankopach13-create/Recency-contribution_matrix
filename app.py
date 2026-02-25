@@ -18,11 +18,13 @@ import plotly.graph_objects as go
 
 from src.load_base import get_last_purchase_table
 from src.recency_contribution import (
+    CATEGORY_COLUMNS,
     contribution_from_base,
     contribution_from_upload,
     contribution_tables_from_upload,
     normalize_upload_columns,
     UPLOAD_REQUIRED_COLUMNS,
+    _filter_by_categories,
 )
 
 BASE_DIR = Path(__file__).resolve().parent / "base"
@@ -42,14 +44,17 @@ def _table_html(data_rows: list[tuple], total_fmt: str, period_to_clients: dict)
     """Одна таблица: закреплённые Итого и заголовки, 4-й столбец — эмодзи-кнопка копирования с hover и анимацией."""
     total_fmt = html.escape(total_fmt)
     cell_style = "padding: 8px 12px; border: 1px solid #ccc;"
-    # Кнопка-эмодзи: при наведении увеличивается, по клику копирует и показывает ✓
+    # Кнопка-эмодзи: копирование с fallback (Clipboard API → execCommand), hover и ✓ после копирования
     copy_btn_tpl = (
         '<button type="button" class="copy-emoji-btn" data-codes="{codes_attr}" '
         'style="cursor:pointer;border:none;background:transparent;font-size:1.1em;padding:4px;'
         'transition:transform 0.2s ease;" '
         'onmouseover="this.style.transform=\'scale(1.4)\'" onmouseout="this.style.transform=\'scale(1)\'" '
-        'onclick="var t=this.getAttribute(\'data-codes\');if(t){{navigator.clipboard.writeText(t.replace(/,/g,\'\\n\'));'
-        'this.textContent=\'✓\';this.style.color=\'green\';var btn=this;setTimeout(function(){{btn.textContent=\'📋\';btn.style.color=\'\';}},1200);}}">📋</button>'
+        'onclick="(function(){{var t=this.getAttribute(\'data-codes\');if(!t)return;var s=t.replace(/,/g,\'\\n\');'
+        'try{{navigator.clipboard.writeText(s);}}catch(e){{var ta=document.createElement(\'textarea\');ta.value=s;'
+        'ta.style.position=\'fixed\';ta.style.left=\'-9999px\';document.body.appendChild(ta);ta.focus();ta.select();'
+        'try{{document.execCommand(\'copy\');}}finally{{document.body.removeChild(ta);}}}} '
+        'this.textContent=\'✓\';this.style.color=\'green\';var b=this;setTimeout(function(){{b.textContent=\'📋\';b.style.color=\'\';}},1500);}}).call(this)">📋</button>'
     )
     rows_html_parts = []
     for month, abs_val, pct in data_rows:
@@ -149,9 +154,18 @@ else:
             if missing:
                 st.error(f"В файле не хватает колонок: {missing}. Ожидаются: {UPLOAD_REQUIRED_COLUMNS}")
             else:
-                categories = ["По всем категориям"] + sorted(df_upload["Группа1"].dropna().astype(str).unique().tolist())
-                choice = st.selectbox("Строить по категориям", options=categories)
-                category_filter = None if choice == "По всем категориям" else choice
+                category_cols_present = [c for c in CATEGORY_COLUMNS if c in df_upload.columns]
+                category_options = []
+                for col in category_cols_present:
+                    category_options.extend(df_upload[col].dropna().astype(str).str.strip().unique().tolist())
+                category_options = sorted(set(category_options))
+                selected_categories = st.multiselect(
+                    "Строить по категориям (Группа1/2/3/4, Товар). Пусто — по всем.",
+                    options=category_options,
+                    default=[],
+                    key="report_categories",
+                )
+                category_filter = selected_categories if selected_categories else None
 
                 if st.button("Построить диаграммы"):
                     with st.spinner("Загружаю реценси из base и считаю вклад по 4 метрикам..."):
@@ -168,7 +182,7 @@ else:
                             if not has_data:
                                 st.warning("Нет пересечения кодов клиентов между загрузкой и базой.")
                             else:
-                                work = df_upload if category_filter is None else df_upload[df_upload["Группа1"].astype(str).str.strip() == str(category_filter).strip()]
+                                work = _filter_by_categories(df_upload, selected_categories) if selected_categories else df_upload
                                 upload_totals = {
                                     "Продажи": float(work["Продажи"].sum()),
                                     "Чеки": float(work["Количество чеков"].sum()),
