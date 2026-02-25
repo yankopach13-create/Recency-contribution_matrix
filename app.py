@@ -90,7 +90,7 @@ def _copy_codes_block_html(text_to_copy: str, block_id: str) -> str:
     escaped = html.escape(text_to_copy)
     return f'''
 <textarea id="codes_ta_{block_id}" style="position:absolute;left:-9999px;width:1px;height:1px;" readonly>{escaped}</textarea>
-<button type="button" id="copy_btn_{block_id}" style="padding:6px 14px;cursor:pointer;font-size:0.95rem;">
+<button type="button" id="copy_btn_{block_id}" style="padding:8px 20px;cursor:pointer;font-size:0.95rem;min-width:220px;width:100%;">
   Скопировать коды
 </button>
 <script>
@@ -128,7 +128,7 @@ def _copy_codes_block_html(text_to_copy: str, block_id: str) -> str:
 
 
 st.set_page_config(page_title="Recency Contribution", layout="wide")
-st.title("Вклад по реценси (месяц последней покупки)")
+st.title("⏳ Матрица вклада в период по давности последней покупки")
 
 use_upload = st.radio(
     "Режим",
@@ -268,12 +268,15 @@ else:
                                     uniformtext=dict(minsize=10, mode="hide"),
                                 )
                                 st.plotly_chart(fig, use_container_width=True)
-                            # Под таблицей и диаграммой: выбор месяца и копирование кодов
+                            # Ниже: блок «Коды клиентов» — выбор периода и кнопка копирования
+                            st.markdown("---")
+                            st.subheader("📋 Коды клиентов")
                             month_options = [
                                 str(m) for m in df_metric["month_label"]
                                 if str(m) != LABEL_NO_BONUS_CARD
                             ]
                             if month_options:
+                                st.caption("Выберите период для копирования кодов клиентов")
                                 row_sel, row_copy = st.columns([1, 1])
                                 with row_sel:
                                     sel_key = f"month_sel_{metric_key.replace(' ', '_').replace('.', '_')}"
