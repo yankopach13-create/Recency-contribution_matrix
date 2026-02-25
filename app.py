@@ -95,7 +95,7 @@ def _copy_codes_block_html(text_to_copy: str, block_id: str) -> str:
 </style>
 <textarea id="codes_ta_{block_id}" style="position:absolute;left:-9999px;width:1px;height:1px;" readonly>{escaped}</textarea>
 <div style="margin-top:2px;">
-<button type="button" id="copy_btn_{block_id}" style="padding:8px 20px;cursor:pointer;font-size:0.95rem;min-width:220px;width:auto;background:#e8e8e8;border:1px solid #ccc;border-radius:8px;box-shadow:0 1px 3px rgba(0,0,0,0.08);color:#333;">
+<button type="button" id="copy_btn_{block_id}" style="padding:8px 20px;cursor:pointer;font-size:0.95rem;min-width:280px;width:100%;box-sizing:border-box;background:#e8e8e8;border:1px solid #ccc;border-radius:8px;box-shadow:0 1px 3px rgba(0,0,0,0.08);color:#333;">
   📋 Скопировать коды
 </button>
 </div>
@@ -284,24 +284,26 @@ else:
                             ]
                             if month_options:
                                 st.caption("Выберите группу клиентов для копирования кодов клиента")
-                                sel_key = f"month_sel_{metric_key.replace(' ', '_').replace('.', '_')}"
-                                selected_month = st.selectbox(
-                                    "Месяц",
-                                    options=month_options,
-                                    key=sel_key,
-                                    label_visibility="collapsed",
-                                )
-                                codes = period_to_clients.get(selected_month, [])
-                                def _fmt_code(c):
-                                    try:
-                                        f = float(c)
-                                        return str(int(f)) if f == int(f) else str(c)
-                                    except (ValueError, TypeError):
-                                        return str(c)
-                                text_to_copy = "\n".join(_fmt_code(c) for c in codes)
-                                block_id = sel_key
-                                copy_html = _copy_codes_block_html(text_to_copy, block_id)
-                                components.html(copy_html, height=52)
+                                col_sel, _ = st.columns([1, 3])
+                                with col_sel:
+                                    sel_key = f"month_sel_{metric_key.replace(' ', '_').replace('.', '_')}"
+                                    selected_month = st.selectbox(
+                                        "Месяц",
+                                        options=month_options,
+                                        key=sel_key,
+                                        label_visibility="collapsed",
+                                    )
+                                    codes = period_to_clients.get(selected_month, [])
+                                    def _fmt_code(c):
+                                        try:
+                                            f = float(c)
+                                            return str(int(f)) if f == int(f) else str(c)
+                                        except (ValueError, TypeError):
+                                            return str(c)
+                                    text_to_copy = "\n".join(_fmt_code(c) for c in codes)
+                                    block_id = sel_key
+                                    copy_html = _copy_codes_block_html(text_to_copy, block_id)
+                                    components.html(copy_html, height=52)
                             else:
                                 st.caption("Нет периодов для выбора кодов (кроме «Клиенты без БК»).")
     else:
