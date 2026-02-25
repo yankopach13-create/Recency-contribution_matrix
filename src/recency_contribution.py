@@ -214,13 +214,20 @@ def contribution_tables_from_upload(
             if agg == "sum":
                 val = no_bk[metric_col].sum()
             else:
-                val = len(no_bk)
+                # Метрика «Клиенты»: точное число клиентов без БК неизвестно — выводим 0
+                val = 0
             parts.append(pd.DataFrame([{"month_label": LABEL_NO_BONUS_CARD, "value": val}]))
         if not parts:
             return empty_df.copy()
         combined = pd.concat(parts, ignore_index=True)
+        # В метрике «Клиенты» итог и доли считаем без строки «Клиенты без БК»
         total = combined["value"].sum()
-        combined["pct"] = (combined["value"] / total * 100).round(1) if total else 0
+        if agg == "nunique":
+            total = combined.loc[combined["month_label"] != LABEL_NO_BONUS_CARD, "value"].sum()
+        combined["pct"] = 0.0
+        if total and total > 0:
+            mask = combined["month_label"] != LABEL_NO_BONUS_CARD if agg == "nunique" else slice(None)
+            combined.loc[mask, "pct"] = (combined.loc[mask, "value"] / total * 100).round(1)
         return combined.sort_values("value", ascending=False).reset_index(drop=True)
 
     period_to_clients = {}
