@@ -39,19 +39,23 @@ def _fmt_num(x) -> str:
 
 
 def _table_html(data_rows: list[tuple], total_fmt: str, period_to_clients: dict) -> str:
-    """Одна таблица: Итого, заголовки, данные; 4-й столбец — кнопка «Скопировать коды»; скролл по вертикали."""
+    """Одна таблица: закреплённые Итого и заголовки, 4-й столбец — эмодзи-кнопка копирования с hover и анимацией."""
     total_fmt = html.escape(total_fmt)
     cell_style = "padding: 8px 12px; border: 1px solid #ccc;"
-    btn_style = "padding: 6px 10px; cursor: pointer; font-size: 0.85rem; white-space: nowrap;"
+    # Кнопка-эмодзи: при наведении увеличивается, по клику копирует и показывает ✓
+    copy_btn_tpl = (
+        '<button type="button" class="copy-emoji-btn" data-codes="{codes_attr}" '
+        'style="cursor:pointer;border:none;background:transparent;font-size:1.1em;padding:4px;'
+        'transition:transform 0.2s ease;" '
+        'onmouseover="this.style.transform=\'scale(1.4)\'" onmouseout="this.style.transform=\'scale(1)\'" '
+        'onclick="var t=this.getAttribute(\'data-codes\');if(t){{navigator.clipboard.writeText(t.replace(/,/g,\'\\n\'));'
+        'this.textContent=\'✓\';this.style.color=\'green\';var btn=this;setTimeout(function(){{btn.textContent=\'📋\';btn.style.color=\'\';}},1200);}}">📋</button>'
+    )
     rows_html_parts = []
     for month, abs_val, pct in data_rows:
         codes = period_to_clients.get(month, [])
         codes_attr = html.escape(",".join(str(c) for c in codes)) if codes else ""
-        copy_btn = (
-            f'<button type="button" style="{btn_style}" class="copy-codes-btn" '
-            f'data-codes="{codes_attr}" onclick="var t=this.getAttribute(\'data-codes\'); '
-            f'if(t) navigator.clipboard.writeText(t.replace(/,/g,\'\\n\'));">Скопировать</button>'
-        )
+        copy_btn = copy_btn_tpl.format(codes_attr=codes_attr)
         rows_html_parts.append(
             f'<tr>'
             f'<td style="{cell_style}">{html.escape(month)}</td>'
@@ -60,6 +64,8 @@ def _table_html(data_rows: list[tuple], total_fmt: str, period_to_clients: dict)
             f'<td style="{cell_style} text-align: center;">{copy_btn}</td></tr>'
         )
     rows_html = "".join(rows_html_parts)
+    sticky_row1 = "position: sticky; top: 0; z-index: 3; background-color: #e8e8e8; box-shadow: 0 2px 4px rgba(0,0,0,0.08);"
+    sticky_row2 = "position: sticky; top: 48px; z-index: 2; background-color: #f5f5f5; box-shadow: 0 2px 4px rgba(0,0,0,0.06);"
     return f"""
 <div style="height: 65vh; overflow-y: auto; overflow-x: hidden;">
 <table class="contribution-table-wrap" style="
@@ -71,13 +77,13 @@ def _table_html(data_rows: list[tuple], total_fmt: str, period_to_clients: dict)
     <col style="width: 25%">
     <col style="width: 25%">
   </colgroup>
-  <tr style="font-weight: bold; background-color: #e8e8e8; color: #000;">
+  <tr style="font-weight: bold; color: #000; {sticky_row1}">
     <td style="{cell_style} text-align: center; color: #000;">Итого</td>
     <td style="{cell_style} text-align: center; color: #000;">{total_fmt}</td>
     <td style="{cell_style} text-align: center; color: #000;">100 %</td>
     <td style="{cell_style} text-align: center; color: #000;">—</td>
   </tr>
-  <tr style="background-color: #f5f5f5; color: #000;">
+  <tr style="color: #000; {sticky_row2}">
     <th style="{cell_style} text-align: center; color: #000;">Месяц</th>
     <th style="{cell_style} text-align: center; color: #000;">Вклад (ABC)</th>
     <th style="{cell_style} text-align: center; color: #000;">Вклад %</th>
