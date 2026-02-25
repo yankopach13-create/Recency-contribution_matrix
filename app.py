@@ -26,6 +26,17 @@ from src.recency_contribution import (
 
 BASE_DIR = Path(__file__).resolve().parent / "base"
 
+
+def _fmt_num(x) -> str:
+    """Форматирует число с пробелом в качестве разделителя тысяч: 3658837.22 → 3 658 837.22"""
+    if pd.isna(x):
+        return ""
+    if isinstance(x, float) and x == int(x):
+        x = int(x)
+    s = f"{x:,.2f}" if isinstance(x, float) and x != int(x) else f"{int(x):,}"
+    return s.replace(",", " ")
+
+
 st.set_page_config(page_title="Recency Contribution", layout="wide")
 st.title("Вклад по реценси (месяц последней покупки)")
 
@@ -125,11 +136,12 @@ else:
                                 display["pct"] = display["pct"].apply(lambda x: f"{x} %")
                                 display = display.rename(columns={"month_label": "Месяц", "value": "Вклад (абс)", "pct": "Вклад %"})
                                 total_value = df_metric["value"].sum()
-                                display = pd.concat([
-                                    display[["Месяц", "Вклад (абс)", "Вклад %"]],
-                                    pd.DataFrame([{"Месяц": "Итого", "Вклад (абс)": total_value, "Вклад %": "100 %"}])
-                                ], ignore_index=True)
-                                st.dataframe(display, use_container_width=True, hide_index=True)
+                                total_row = pd.DataFrame([{"Месяц": "Итого", "Вклад (абс)": total_value, "Вклад %": "100 %"}])
+                                display = pd.concat([total_row, display[["Месяц", "Вклад (абс)", "Вклад %"]]], ignore_index=True)
+                                display["Вклад (абс)"] = display["Вклад (абс)"].apply(lambda x: _fmt_num(x) if isinstance(x, (int, float)) else x)
+                                def _highlight_total(row):
+                                    return ["font-weight: bold; background-color: #e8e8e8"] * len(row) if row["Месяц"] == "Итого" else [""] * len(row)
+                                st.dataframe(display.style.apply(_highlight_total, axis=1), use_container_width=True, hide_index=True)
                             with col_chart:
                                 fig = go.Figure(data=[go.Pie(
                                     labels=df_metric["month_label"],
@@ -142,7 +154,7 @@ else:
                                     textfont=dict(size=12),
                                     automargin=True,
                                 )])
-                                total_str = f"{upload_totals[metric_key]:,.0f}".replace(",", " ")
+                                total_str = _fmt_num(upload_totals[metric_key])
                                 fig.add_annotation(
                                     text=total_str,
                                     x=0.5, y=0.5, showarrow=False,
