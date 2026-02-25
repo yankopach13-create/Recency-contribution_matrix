@@ -89,8 +89,12 @@ def _copy_codes_block_html(text_to_copy: str, block_id: str) -> str:
     """HTML: скрытый textarea и кнопка в стиле скриншота (не белая), эмодзи список."""
     escaped = html.escape(text_to_copy)
     return f'''
+<style>
+#copy_btn_{block_id} {{ transition: background 0.2s ease, box-shadow 0.2s ease, transform 0.2s ease; }}
+#copy_btn_{block_id}:hover {{ background: #d8d8d8 !important; box-shadow: 0 2px 6px rgba(0,0,0,0.12); transform: scale(1.02); }}
+</style>
 <textarea id="codes_ta_{block_id}" style="position:absolute;left:-9999px;width:1px;height:1px;" readonly>{escaped}</textarea>
-<div style="display:flex;align-items:flex-end;height:62px;">
+<div style="display:flex;align-items:flex-end;height:72px;padding-bottom:4px;">
 <button type="button" id="copy_btn_{block_id}" style="padding:8px 20px;cursor:pointer;font-size:0.95rem;min-width:220px;width:100%;background:#e8e8e8;border:1px solid #ccc;border-radius:8px;box-shadow:0 1px 3px rgba(0,0,0,0.08);color:#333;">
   📋 Скопировать коды
 </button>
@@ -299,7 +303,7 @@ else:
                                     text_to_copy = "\n".join(_fmt_code(c) for c in codes)
                                     block_id = sel_key
                                     copy_html = _copy_codes_block_html(text_to_copy, block_id)
-                                    components.html(copy_html, height=62)
+                                    components.html(copy_html, height=76)
                             else:
                                 st.caption("Нет периодов для выбора кодов (кроме «Клиенты без БК»).")
     else:
