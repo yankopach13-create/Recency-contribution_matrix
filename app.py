@@ -90,9 +90,11 @@ def _copy_codes_block_html(text_to_copy: str, block_id: str) -> str:
     escaped = html.escape(text_to_copy)
     return f'''
 <textarea id="codes_ta_{block_id}" style="position:absolute;left:-9999px;width:1px;height:1px;" readonly>{escaped}</textarea>
+<div style="display:flex;align-items:flex-end;height:62px;">
 <button type="button" id="copy_btn_{block_id}" style="padding:8px 20px;cursor:pointer;font-size:0.95rem;min-width:220px;width:100%;background:#e8e8e8;border:1px solid #ccc;border-radius:8px;box-shadow:0 1px 3px rgba(0,0,0,0.08);color:#333;">
   📋 Скопировать коды
 </button>
+</div>
 <script>
 (function() {{
   var ta = document.getElementById("codes_ta_{block_id}");
@@ -297,7 +299,7 @@ else:
                                     text_to_copy = "\n".join(_fmt_code(c) for c in codes)
                                     block_id = sel_key
                                     copy_html = _copy_codes_block_html(text_to_copy, block_id)
-                                    components.html(copy_html, height=50)
+                                    components.html(copy_html, height=62)
                             else:
                                 st.caption("Нет периодов для выбора кодов (кроме «Клиенты без БК»).")
     else:
