@@ -29,6 +29,10 @@ UPLOAD_COL_ALIASES = {
     "Количество товара": UPLOAD_COL_ITEMS,  # часто в файлах с окончанием "а"
 }
 
+# Специальные строки в таблице вклада
+LABEL_NO_BONUS_CARD = "Клиенты без БК"
+LABEL_NEW_CLIENTS = "Новые клиенты"
+
 
 def normalize_upload_columns(df: pd.DataFrame) -> pd.DataFrame:
     """
@@ -145,13 +149,16 @@ def contribution_tables_from_upload(
 ) -> Tuple[Dict[str, pd.DataFrame], Dict[str, List[str]]]:
     """
     Строит 4 таблицы вклада по реценси для метрик: Продажи, Чеки, Товар в шт., Клиенты.
-    Загружаемый документ должен содержать: Группа1, Продажи, Количество чеков, Количество товар, Код клиента.
-    - category_filter is None → по всем категориям; иначе только строки с Группа1 == category_filter.
-    Возвращает словарь { "Продажи": df, "Чеки": df, "Товар в шт.": df, "Клиенты": df },
-    каждый df: month_label, value (абсолютный вклад), pct (доля %).
+    Учитывает: реценси из базы, «Клиенты без БК» (пустой код клиента), «Новые клиенты» (код не в базе).
     """
-    empty_tables = {"Продажи": pd.DataFrame(columns=["month_label", "value", "pct"]).copy(), "Чеки": pd.DataFrame(columns=["month_label", "value", "pct"]).copy(), "Товар в шт.": pd.DataFrame(columns=["month_label", "value", "pct"]).copy(), "Клиенты": pd.DataFrame(columns=["month_label", "value", "pct"]).copy()}
-    if df_upload.empty or df_last_purchase.empty:
+    empty_df = pd.DataFrame(columns=["month_label", "value", "pct"])
+    empty_tables = {
+        "Продажи": empty_df.copy(),
+        "Чеки": empty_df.copy(),
+        "Товар в шт.": empty_df.copy(),
+        "Клиенты": empty_df.copy(),
+    }
+    if df_upload.empty:
         return (empty_tables, {})
     if not all(c in df_upload.columns for c in UPLOAD_REQUIRED_COLUMNS):
         return (empty_tables, {})
@@ -162,33 +169,73 @@ def contribution_tables_from_upload(
     if work.empty:
         return (empty_tables, {})
 
-    df_last = _add_recency_month(df_last_purchase)
-    merged = work.merge(
-        df_last[[COL_CLIENT_CODE, "period_label"]],
-        on=COL_CLIENT_CODE,
-        how="inner",
-    )
-    if merged.empty:
-        return (empty_tables, {})
+    # Строки с пустым кодом клиента — клиенты без бонусной карты
+    code_empty = work[COL_CLIENT_CODE].isna() | (work[COL_CLIENT_CODE].astype(str).str.strip() == "")
+    work_empty = work[code_empty]
+    work_with_code = work[~code_empty]
 
-    def _table_for_metric(metric_col: str, agg: Literal["sum", "nunique"]) -> pd.DataFrame:
-        if agg == "sum":
-            by_period = merged.groupby("period_label", as_index=False)[metric_col].sum()
-        else:
-            by_period = merged.groupby("period_label", as_index=False)[COL_CLIENT_CODE].nunique()
-        by_period = by_period.rename(columns={"period_label": "month_label"})
-        by_period.columns = ["month_label", "value"]
-        total = by_period["value"].sum()
-        by_period["pct"] = (by_period["value"] / total * 100).round(1) if total else 0
-        return by_period.sort_values("value", ascending=False).reset_index(drop=True)
+    # Объединяем с базой по коду клиента (left: остаются и те, кого нет в базе — новые клиенты)
+    if df_last_purchase.empty:
+        merged = work_with_code.copy()
+        merged["period_label"] = np.nan
+    else:
+        df_last = _add_recency_month(df_last_purchase)
+        merged = work_with_code.merge(
+            df_last[[COL_CLIENT_CODE, "period_label"]],
+            on=COL_CLIENT_CODE,
+            how="left",
+        )
+    merged_in_base = merged[merged["period_label"].notna()]
+    new_clients = merged[merged["period_label"].isna()]
 
-    period_to_clients = merged.groupby("period_label")[COL_CLIENT_CODE].apply(
-        lambda s: [str(x) for x in s.unique().tolist()]
-    ).to_dict()
+    def _one_metric(
+        metric_col: str,
+        agg: Literal["sum", "nunique"],
+        in_base: pd.DataFrame,
+        no_bk: pd.DataFrame,
+        new: pd.DataFrame,
+    ) -> pd.DataFrame:
+        parts = []
+        if not in_base.empty:
+            if agg == "sum":
+                by_period = in_base.groupby("period_label", as_index=False)[metric_col].sum()
+            else:
+                by_period = in_base.groupby("period_label", as_index=False)[COL_CLIENT_CODE].nunique()
+            by_period = by_period.rename(columns={"period_label": "month_label"})
+            by_period.columns = ["month_label", "value"]
+            parts.append(by_period)
+        if not new.empty:
+            if agg == "sum":
+                val = new[metric_col].sum()
+            else:
+                val = new[COL_CLIENT_CODE].nunique()
+            parts.append(pd.DataFrame([{"month_label": LABEL_NEW_CLIENTS, "value": val}]))
+        if not no_bk.empty:
+            if agg == "sum":
+                val = no_bk[metric_col].sum()
+            else:
+                val = len(no_bk)
+            parts.append(pd.DataFrame([{"month_label": LABEL_NO_BONUS_CARD, "value": val}]))
+        if not parts:
+            return empty_df.copy()
+        combined = pd.concat(parts, ignore_index=True)
+        total = combined["value"].sum()
+        combined["pct"] = (combined["value"] / total * 100).round(1) if total else 0
+        return combined.sort_values("value", ascending=False).reset_index(drop=True)
+
+    period_to_clients = {}
+    if not merged_in_base.empty:
+        period_to_clients = merged_in_base.groupby("period_label")[COL_CLIENT_CODE].apply(
+            lambda s: [str(x) for x in s.unique().tolist()]
+        ).to_dict()
+    if not new_clients.empty:
+        period_to_clients[LABEL_NEW_CLIENTS] = [str(x) for x in new_clients[COL_CLIENT_CODE].unique().tolist()]
+    period_to_clients[LABEL_NO_BONUS_CARD] = []
+
     tables = {
-        "Продажи": _table_for_metric(UPLOAD_COL_SALES, "sum"),
-        "Чеки": _table_for_metric(UPLOAD_COL_RECEIPTS, "sum"),
-        "Товар в шт.": _table_for_metric(UPLOAD_COL_ITEMS, "sum"),
-        "Клиенты": _table_for_metric(COL_CLIENT_CODE, "nunique"),
+        "Продажи": _one_metric(UPLOAD_COL_SALES, "sum", merged_in_base, work_empty, new_clients),
+        "Чеки": _one_metric(UPLOAD_COL_RECEIPTS, "sum", merged_in_base, work_empty, new_clients),
+        "Товар в шт.": _one_metric(UPLOAD_COL_ITEMS, "sum", merged_in_base, work_empty, new_clients),
+        "Клиенты": _one_metric(COL_CLIENT_CODE, "nunique", merged_in_base, work_empty, new_clients),
     }
     return (tables, period_to_clients)
