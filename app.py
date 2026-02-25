@@ -283,27 +283,25 @@ else:
                                 if str(m) != LABEL_NO_BONUS_CARD
                             ]
                             if month_options:
-                                st.caption("Выберите период для копирования кодов клиентов")
-                                row_sel, row_copy = st.columns([1, 1])
-                                with row_sel:
-                                    sel_key = f"month_sel_{metric_key.replace(' ', '_').replace('.', '_')}"
-                                    selected_month = st.selectbox(
-                                        "Месяц",
-                                        options=month_options,
-                                        key=sel_key,
-                                    )
-                                with row_copy:
-                                    codes = period_to_clients.get(selected_month, [])
-                                    def _fmt_code(c):
-                                        try:
-                                            f = float(c)
-                                            return str(int(f)) if f == int(f) else str(c)
-                                        except (ValueError, TypeError):
-                                            return str(c)
-                                    text_to_copy = "\n".join(_fmt_code(c) for c in codes)
-                                    block_id = sel_key
-                                    copy_html = _copy_codes_block_html(text_to_copy, block_id)
-                                    components.html(copy_html, height=76)
+                                st.caption("Выберите группу клиентов для копирования кодов клиента")
+                                sel_key = f"month_sel_{metric_key.replace(' ', '_').replace('.', '_')}"
+                                selected_month = st.selectbox(
+                                    "Месяц",
+                                    options=month_options,
+                                    key=sel_key,
+                                    label_visibility="collapsed",
+                                )
+                                codes = period_to_clients.get(selected_month, [])
+                                def _fmt_code(c):
+                                    try:
+                                        f = float(c)
+                                        return str(int(f)) if f == int(f) else str(c)
+                                    except (ValueError, TypeError):
+                                        return str(c)
+                                text_to_copy = "\n".join(_fmt_code(c) for c in codes)
+                                block_id = sel_key
+                                copy_html = _copy_codes_block_html(text_to_copy, block_id)
+                                components.html(copy_html, height=76)
                             else:
                                 st.caption("Нет периодов для выбора кодов (кроме «Клиенты без БК»).")
     else:
