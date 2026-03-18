@@ -1,12 +1,11 @@
 """
 Recency Contribution Matrix — Streamlit.
-Период из календаря, категории из файлов окна (Группа1–3),
+Период вводится вручную (даты), категории из файлов окна (Группа1–3),
 предыдущая покупка — по всей истории base до начала периода.
 """
 
 import html
 import sys
-from datetime import date
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -34,6 +33,16 @@ from src.recency_contribution import (
 )
 
 BASE_DIR = Path(__file__).resolve().parent / "base"
+
+
+def _parse_date_text(s: str):
+    """Парсинг даты: ДД.ММ.ГГГГ (и похожие форматы, dayfirst)."""
+    if s is None or not str(s).strip():
+        return None
+    ts = pd.to_datetime(str(s).strip(), dayfirst=True, errors="coerce")
+    if pd.isna(ts):
+        return None
+    return ts.date()
 
 
 def _fmt_num(x) -> str:
@@ -147,14 +156,20 @@ else:
         "(в имени Excel укажите год и месяц, например `2024 январь.xlsx`)."
     )
 
+st.caption("Формат дат: **ДД.ММ.ГГГГ** (например, 01.04.2024).")
 col_d1, col_d2 = st.columns(2)
 with col_d1:
-    d_from = st.date_input("Начало периода анализа", value=date.today(), key="d_from")
+    t_from = st.text_input("Начало периода анализа", key="txt_d_from", placeholder="ДД.ММ.ГГГГ")
 with col_d2:
-    d_to = st.date_input("Конец периода анализа", value=date.today(), key="d_to")
+    t_to = st.text_input("Конец периода анализа", key="txt_d_to", placeholder="ДД.ММ.ГГГГ")
 
+d_from = _parse_date_text(t_from)
+d_to = _parse_date_text(t_to)
+if d_from is None or d_to is None:
+    st.info("Укажите дату начала и дату конца периода.")
+    st.stop()
 if d_from > d_to:
-    st.error("Начало периода не может быть позже конца.")
+    st.error("Начало периода не может быть позже конца. Проверьте ввод.")
     st.stop()
 
 if st.button("Сканировать выбранный период", type="secondary"):
