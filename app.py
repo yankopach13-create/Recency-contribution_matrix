@@ -483,8 +483,14 @@ _d1 = st.session_state.get("period_d_to")
 
 with st.container(border=True):
     if _d0 and _d1:
+        _range_s = html.escape(
+            f"{_d0.strftime('%d.%m.%Y')} — {_d1.strftime('%d.%m.%Y')}"
+        )
         st.markdown(
-            f"**Анализируемый период:** {_d0.strftime('%d.%m.%Y')} — {_d1.strftime('%d.%m.%Y')}"
+            f'<div style="font-size:1.35rem;line-height:1.4;margin:0 0 0.65rem 0;">'
+            f"<strong>Анализируемый период:</strong> "
+            f'<span style="color:#1e40af;font-weight:600;">{_range_s}</span></div>',
+            unsafe_allow_html=True,
         )
 
     tab_names = ["Вклад в выручку", "Вклад в чеки", "Вклад в товар", "Вклад клиентов"]
