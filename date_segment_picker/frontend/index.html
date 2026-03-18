@@ -127,23 +127,44 @@
       return { y: y, m: m, d: d, iso: toIso(y, m, d) };
     }
 
-    /** clearFields: 'all' | 'start' | 'end' — что стереть в форме после ошибки */
+    /** Сразу в iframe стираем неверные поля (не ждём rerun Streamlit). */
+    function clearLocalInputs(clearFields) {
+      var cf = clearFields || "all";
+      function clr(ids) {
+        ids.forEach(function (id) {
+          var el = document.getElementById(id);
+          if (el) el.value = "";
+        });
+      }
+      if (cf === "all") clr(["fd", "fm", "fy", "td", "tm", "ty"]);
+      else if (cf === "start") clr(["fd", "fm", "fy"]);
+      else if (cf === "end") clr(["td", "tm", "ty"]);
+    }
+
+    /** clearFields: 'all' | 'start' | 'end' */
     function reportValidationError(msg, clearFields) {
-      var fd = document.getElementById("fd").value.trim();
-      var fm = document.getElementById("fm").value.trim();
-      var fy = document.getElementById("fy").value.trim();
-      var td = document.getElementById("td").value.trim();
-      var tm = document.getElementById("tm").value.trim();
-      var ty = document.getElementById("ty").value.trim();
+      var cf = clearFields || "all";
+      clearLocalInputs(cf);
+      var fd = (document.getElementById("fd") && document.getElementById("fd").value) || "";
+      var fm = (document.getElementById("fm") && document.getElementById("fm").value) || "";
+      var fy = (document.getElementById("fy") && document.getElementById("fy").value) || "";
+      var td = (document.getElementById("td") && document.getElementById("td").value) || "";
+      var tm = (document.getElementById("tm") && document.getElementById("tm").value) || "";
+      var ty = (document.getElementById("ty") && document.getElementById("ty").value) || "";
       send({
         type: "streamlit:setComponentValue",
         value: {
-          fd: fd, fm: fm, fy: fy, td: td, tm: tm, ty: ty,
+          fd: fd.trim(), fm: fm.trim(), fy: fy.trim(),
+          td: td.trim(), tm: tm.trim(), ty: ty.trim(),
           _nonce: Date.now(),
           _clientValidationError: msg,
-          _clearFields: clearFields || "all",
+          _clearFields: cf,
         },
       });
+      setTimeout(function () {
+        if (cf === "end") document.getElementById("td").focus();
+        else document.getElementById("fd").focus();
+      }, 80);
     }
 
     function apply() {
