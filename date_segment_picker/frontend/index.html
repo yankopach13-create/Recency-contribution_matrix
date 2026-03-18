@@ -1,0 +1,154 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Период</title>
+  <style>
+    * { box-sizing: border-box; }
+    body {
+      font-family: system-ui, -apple-system, sans-serif;
+      margin: 0;
+      padding: 8px 4px;
+      color: #31333f;
+    }
+    .row { display: flex; align-items: center; gap: 6px; margin-bottom: 12px; }
+    .label { font-weight: 600; margin: 0 0 6px 0; font-size: 0.9rem; }
+    input {
+      width: 2.5rem;
+      padding: 8px 4px;
+      text-align: center;
+      font-size: 1rem;
+      border: 1px solid #ccc;
+      border-radius: 6px;
+    }
+    input.y4 { width: 4rem; }
+    .dot { font-size: 1.2rem; user-select: none; }
+    button {
+      padding: 10px 20px;
+      font-size: 1rem;
+      cursor: pointer;
+      background: #ff4b4b;
+      color: #fff;
+      border: none;
+      border-radius: 8px;
+      margin-top: 4px;
+    }
+    button:hover { filter: brightness(1.05); }
+    .hint { font-size: 0.8rem; color: #666; margin-top: 8px; max-width: 480px; }
+  </style>
+</head>
+<body>
+  <p class="label">Начало периода</p>
+  <div class="row">
+    <input id="fd" type="text" inputmode="numeric" maxlength="2" placeholder="ДД" autocomplete="off" />
+    <span class="dot">.</span>
+    <input id="fm" type="text" inputmode="numeric" maxlength="2" placeholder="ММ" autocomplete="off" />
+    <span class="dot">.</span>
+    <input id="fy" class="y4" type="text" inputmode="numeric" maxlength="4" placeholder="ГГГГ" autocomplete="off" />
+  </div>
+  <p class="label">Конец периода</p>
+  <div class="row">
+    <input id="td" type="text" inputmode="numeric" maxlength="2" placeholder="ДД" autocomplete="off" />
+    <span class="dot">.</span>
+    <input id="tm" type="text" inputmode="numeric" maxlength="2" placeholder="ММ" autocomplete="off" />
+    <span class="dot">.</span>
+    <input id="ty" class="y4" type="text" inputmode="numeric" maxlength="4" placeholder="ГГГГ" autocomplete="off" />
+  </div>
+  <button type="button" id="applyBtn">Применить даты</button>
+  <p class="hint">Только цифры. После заполнения дня/месяца (2 цифры) и года (4 цифры) — переход к следующему полю. Enter — применить.</p>
+
+  <script>
+    function send(msg) {
+      window.parent.postMessage(Object.assign({ isStreamlitMessage: true }, msg), "*");
+    }
+
+    var initialized = false;
+    function signalReady() {
+      if (!initialized) {
+        initialized = true;
+        send({ type: "streamlit:componentReady", apiVersion: 1 });
+      }
+      send({ type: "streamlit:setFrameHeight", height: 340 });
+    }
+
+    function digits(el, maxLen) {
+      el.value = el.value.replace(/\D/g, "").slice(0, maxLen);
+    }
+
+    var prevMap = { fm: "fd", fy: "fm", td: "fy", tm: "td", ty: "tm" };
+
+    function chain(id, maxLen, nextId) {
+      var el = document.getElementById(id);
+      if (!el) return;
+      el.addEventListener("input", function () {
+        digits(this, maxLen);
+        if (this.value.length >= maxLen && nextId) {
+          document.getElementById(nextId).focus();
+        }
+      });
+      el.addEventListener("keydown", function (e) {
+        if (e.key === "Backspace" && this.value === "" && prevMap[id]) {
+          var p = document.getElementById(prevMap[id]);
+          if (p) {
+            p.focus();
+            p.value = p.value.slice(0, -1);
+          }
+        }
+      });
+    }
+
+    function apply() {
+      send({
+        type: "streamlit:setComponentValue",
+        value: {
+          fd: document.getElementById("fd").value.trim(),
+          fm: document.getElementById("fm").value.trim(),
+          fy: document.getElementById("fy").value.trim(),
+          td: document.getElementById("td").value.trim(),
+          tm: document.getElementById("tm").value.trim(),
+          ty: document.getElementById("ty").value.trim(),
+        },
+      });
+    }
+
+    chain("fd", 2, "fm");
+    chain("fm", 2, "fy");
+    chain("fy", 4, "td");
+    chain("td", 2, "tm");
+    chain("tm", 2, "ty");
+    chain("ty", 4, null);
+
+    document.getElementById("ty").addEventListener("keydown", function (e) {
+      if (e.key === "Enter") {
+        e.preventDefault();
+        apply();
+      }
+    });
+
+    document.getElementById("applyBtn").addEventListener("click", apply);
+
+    window.addEventListener("message", function (ev) {
+      if (!ev.data || ev.data.type !== "streamlit:render") return;
+      var args = ev.data.args || {};
+      var d = args.prefill || {};
+      ["fd", "fm", "fy", "td", "tm", "ty"].forEach(function (k) {
+        var el = document.getElementById(k);
+        var v = d[k];
+        if (el && v != null && String(v) !== "") el.value = String(v);
+      });
+      signalReady();
+      setTimeout(function () {
+        document.getElementById("fd").focus();
+      }, 80);
+    });
+
+    setTimeout(function () {
+      if (!initialized) {
+        signalReady();
+        document.getElementById("fd").focus();
+      }
+    }, 600);
+  </script>
+</body>
+</html>
