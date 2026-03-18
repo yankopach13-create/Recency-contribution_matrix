@@ -28,12 +28,15 @@ from src.base_period import (
     filter_window_by_categories,
     load_window_dataframe,
     normalize_client_code,
+    load_last_purchase_day_rows,
     scan_previous_purchase_dates,
     sorted_unique_non_empty,
+    top_g2_last_purchase_day,
     validate_user_period_for_scan,
 )
 from date_segment_picker import render_date_segment_picker
 from src.recency_contribution import (
+    LABEL_NEW_CLIENTS,
     LABEL_NO_BONUS_CARD,
     contribution_tables_from_prev_purchase,
 )
@@ -251,6 +254,9 @@ if _bounds is None:
         "_dsp_prefill",
         "_date_picker_error",
         "_period_scan_warns",
+        "_prev_purchase_map",
+        "_lp_cache_sig",
+        "_lp_top_df",
     ):
         st.session_state.pop(_k, None)
 
@@ -354,6 +360,9 @@ with st.container(border=True):
                     st.session_state.pop("contribution_tables", None)
                     st.session_state.pop("upload_totals", None)
                     st.session_state.pop("period_to_clients", None)
+                    st.session_state.pop("_prev_purchase_map", None)
+                    st.session_state.pop("_lp_cache_sig", None)
+                    st.session_state.pop("_lp_top_df", None)
                     if df_win.empty:
                         st.session_state.pop("window_df", None)
                         st.session_state.pop("window_d_from", None)
@@ -428,6 +437,8 @@ with st.container(border=True):
     if st.button(
         "Применить все фильтры для анализа", type="primary", key="btn_apply_filters"
     ):
+        st.session_state.pop("_lp_cache_sig", None)
+        st.session_state.pop("_lp_top_df", None)
         df_work = filter_window_by_categories(df_cat, g1_f, g2_f, g3_f)
         mask_win = (
             pd.to_datetime(df_work["Дата"], errors="coerce").dt.date >= d_from
@@ -468,6 +479,9 @@ with st.container(border=True):
         st.session_state["contribution_tables"] = tables
         st.session_state["upload_totals"] = upload_totals
         st.session_state["period_to_clients"] = period_to_clients
+        st.session_state["_prev_purchase_map"] = {
+            str(k): pd.Timestamp(v) for k, v in prev_map.items()
+        }
 
 if "contribution_tables" not in st.session_state:
     st.stop()
@@ -578,3 +592,112 @@ with st.container(border=True):
                     )
             else:
                 st.caption("Нет периодов для выбора кодов (кроме «Клиенты без БК»).")
+
+    st.markdown("---")
+    st.subheader("🛒 Анализ последней покупки")
+    st.caption(
+        "По выбранным сегментам реценси — что клиенты покупали в **последний календарный день** "
+        "покупки до начала периода анализа (топ‑10 по **Группа2**)."
+    )
+    _seg_opts = sorted(
+        k
+        for k in period_to_clients
+        if k != LABEL_NEW_CLIENTS and period_to_clients.get(k)
+    )
+    if not _seg_opts:
+        st.info("Нет сегментов для анализа (кроме «Новых клиентов»).")
+    elif "_prev_purchase_map" not in st.session_state:
+        st.warning("Нажмите **Применить все фильтры для анализа** заново, чтобы загрузить данные.")
+    else:
+        _lp_sel = st.multiselect(
+            "Сегменты (клиенты объединяются)",
+            options=_seg_opts,
+            default=[],
+            key="msel_last_purchase_segments",
+            placeholder="Выберите один или несколько сегментов",
+        )
+        if not _lp_sel:
+            st.info("Выберите хотя бы один сегмент реценси.")
+        else:
+            _clients_u: set = set()
+            for _seg in _lp_sel:
+                for _c in period_to_clients.get(_seg, []):
+                    _nc = normalize_client_code(_c)
+                    if _nc:
+                        _clients_u.add(str(_nc))
+            _pm_raw = st.session_state["_prev_purchase_map"]
+            _pm = {
+                str(k): pd.Timestamp(v) if not isinstance(v, pd.Timestamp) else v
+                for k, v in _pm_raw.items()
+            }
+            _clients_prev = {c for c in _clients_u if c in _pm}
+            _n_union = len(_clients_prev)
+            if _n_union == 0:
+                st.warning("У выбранных клиентов нет даты предыдущей покупки в данных.")
+            else:
+                _clients_sorted = sorted(_clients_prev, key=lambda x: (len(x), x))
+                st.caption(
+                    "Опционально сузьте выборку: **пустой список** — все клиенты сегментов "
+                    f"({_n_union} чел.); иначе только отмеченные."
+                )
+                _lp_client_pick = st.multiselect(
+                    "Клиенты последней покупки",
+                    options=_clients_sorted,
+                    default=[],
+                    key="msel_last_purchase_clients",
+                    placeholder="Все клиенты выбранных сегментов",
+                )
+                _clients_use = (
+                    set(_lp_client_pick) if _lp_client_pick else set(_clients_prev)
+                )
+                _n_den = len(_clients_use)
+                if _n_den == 0:
+                    st.warning("Выберите хотя бы одного клиента или очистите фильтр клиентов.")
+                else:
+                    _sig = (
+                        tuple(sorted(_lp_sel)),
+                        tuple(sorted(_lp_client_pick))
+                        if _lp_client_pick
+                        else ("__all__",),
+                        _n_den,
+                        str(_d0),
+                    )
+                    if st.session_state.get("_lp_cache_sig") == _sig and isinstance(
+                        st.session_state.get("_lp_top_df"), pd.DataFrame
+                    ):
+                        _top_lp = st.session_state["_lp_top_df"]
+                    else:
+
+                        def _lp_cb(cur: int, total: int, name: str):
+                            pass
+
+                        with st.spinner(
+                            "Сканирую base: строки за последний день покупки…"
+                        ):
+                            _raw_lp = load_last_purchase_day_rows(
+                                BASE_DIR,
+                                _clients_use,
+                                _pm,
+                                _d0,
+                                progress=_lp_cb,
+                            )
+                        _top_lp = top_g2_last_purchase_day(_raw_lp, _n_den, top_n=10)
+                        st.session_state["_lp_cache_sig"] = _sig
+                        st.session_state["_lp_top_df"] = _top_lp
+
+                    st.caption(
+                        f"Уникальных клиентов в выборе (с историей до периода): **{_n_den}**. "
+                        f"**% клиентов** — доля от этого числа."
+                    )
+                    col_l, col_r = st.columns([1, 2])
+                    with col_l:
+                        st.metric("Клиентов в выборе", _n_den)
+                    with col_r:
+                        if _top_lp.empty:
+                            st.warning("Нет строк за последний день покупки в base.")
+                        else:
+                            st.dataframe(
+                                _top_lp,
+                                use_container_width=True,
+                                hide_index=True,
+                            )

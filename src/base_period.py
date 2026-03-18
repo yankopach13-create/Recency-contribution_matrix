@@ -363,6 +363,92 @@ def scan_previous_purchase_dates(
     return prev
 
 
+def load_last_purchase_day_rows(
+    base_dir: Path,
+    client_codes: Set[str],
+    prev_map: Dict[str, pd.Timestamp],
+    window_start: date,
+    progress: Optional[Callable[[int, int, str], None]] = None,
+) -> pd.DataFrame:
+    """
+    Для каждого клиента из client_codes с записью в prev_map — все строки продаж
+    за календарный день последней покупки (строго до window_start).
+    """
+    last_day: Dict[str, date] = {}
+    for cc in client_codes:
+        ts = prev_map.get(cc)
+        if ts is None or (isinstance(ts, float) and pd.isna(ts)):
+            continue
+        t = pd.Timestamp(ts)
+        if pd.isna(t):
+            continue
+        last_day[cc] = t.normalize().date()
+    if not last_day:
+        return pd.DataFrame()
+
+    y0, m0 = window_start.year, window_start.month
+    frames: List[pd.DataFrame] = []
+    classified = classify_files(base_dir)
+    n_files = len(classified)
+    for idx, (path, ym) in enumerate(classified):
+        if progress:
+            progress(idx + 1, n_files, path.name)
+        skip_entire = False
+        if ym is not None:
+            fy, fm = ym
+            if (fy, fm) > (y0, m0):
+                skip_entire = True
+        if skip_entire:
+            continue
+
+        df = load_sales_excel(path)
+        if df is None or df.empty:
+            continue
+        df = df.copy()
+        codes = df[COL_CLIENT].map(normalize_client_code)
+        df = df.assign(_cc=codes)
+        df = df[df["_cc"].notna() & df["_cc"].isin(last_day)]
+        if df.empty:
+            continue
+        row_d = df[COL_DATE].dt.normalize().dt.date
+        ld = df["_cc"].map(last_day)
+        df = df.loc[row_d == ld].copy()
+        if df.empty:
+            continue
+        df["_source_file"] = path.name
+        frames.append(df)
+
+    if not frames:
+        return pd.DataFrame()
+    return pd.concat(frames, ignore_index=True)
+
+
+def top_g2_last_purchase_day(
+    df_lines: pd.DataFrame, total_clients: int, top_n: int = 10
+) -> pd.DataFrame:
+    """
+    Топ top_n по Группа2: число клиентов (уникальных) и доля от total_clients, сумма Продажи.
+    """
+    if df_lines.empty or total_clients <= 0:
+        return pd.DataFrame(
+            columns=["Группа2", "Клиентов", "% клиентов", "Продажи"]
+        )
+    if "_cc" not in df_lines.columns:
+        df_lines = df_lines.copy()
+        df_lines["_cc"] = df_lines[COL_CLIENT].map(normalize_client_code)
+    g = (
+        df_lines.groupby(COL_G2, as_index=False)
+        .agg(Клиентов=("_cc", "nunique"), Продажи=(COL_SALES, "sum"))
+        .sort_values("Клиентов", ascending=False)
+        .head(top_n)
+    )
+    g["% клиентов"] = (g["Клиентов"] / total_clients * 100).round(1)
+    g["Продажи"] = g["Продажи"].round(2)
+    return g[
+        ["Группа2", "Клиентов", "% клиентов", "Продажи"]
+    ].reset_index(drop=True)
+
+
 def filter_window_by_categories(
     df: pd.DataFrame,
     g1: Optional[Union[str, Sequence[str]]] = None,
