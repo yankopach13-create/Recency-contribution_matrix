@@ -267,3 +267,120 @@ def contribution_tables_from_upload(
         "Клиенты": _one_metric(COL_CLIENT_CODE, "nunique", merged_in_base, work_empty, new_clients),
     }
     return (tables, period_to_clients)
+
+
+def prev_purchase_ts_to_period_label(ts: pd.Timestamp) -> str:
+    """
+    Подпись периода реценси по дате предыдущей покупки (как period_label в режиме загрузки).
+    2024 — кварталы; остальные годы — месяц + год.
+    """
+    if pd.isna(ts):
+        return ""
+    year = int(ts.year)
+    month = int(ts.month)
+    month_label = MONTH_NAMES[month] + " " + str(year)
+    if year == 2024:
+        quarter = (month - 1) // 3 + 1
+        return f"C{quarter} {year}"
+    return month_label
+
+
+def contribution_tables_from_prev_purchase(
+    df_window: pd.DataFrame,
+    prev_purchase_by_client: Dict,
+    client_norm_col: str = "_client_norm",
+) -> Tuple[Dict[str, pd.DataFrame], Dict[str, List[str]]]:
+    """
+    Вклад по метрикам окна анализа, сгруппированный по периоду *предыдущей* покупки
+    (до начала окна). Ключи prev_purchase_by_client — нормализованные коды клиентов.
+    Ожидаемые колонки df_window: Продажи, Количество чеков, Количество товар, Код клиента
+    и client_norm_col (нормализованный код).
+    """
+    empty_df = pd.DataFrame(columns=["month_label", "value", "pct"])
+    empty_tables = {
+        "Продажи": empty_df.copy(),
+        "Чеки": empty_df.copy(),
+        "Товар в шт.": empty_df.copy(),
+        "Клиенты": empty_df.copy(),
+    }
+    req = [UPLOAD_COL_SALES, UPLOAD_COL_RECEIPTS, UPLOAD_COL_ITEMS, COL_CLIENT_CODE]
+    if df_window.empty or not all(c in df_window.columns for c in req):
+        return (empty_tables, {})
+    if client_norm_col not in df_window.columns:
+        return (empty_tables, {})
+
+    work = df_window.copy()
+    code_empty = work[COL_CLIENT_CODE].isna() | (work[COL_CLIENT_CODE].astype(str).str.strip() == "")
+    work_empty = work[code_empty]
+    work_with_code = work[~code_empty].copy()
+
+    def _period_for_row(cc_norm) -> Optional[str]:
+        if cc_norm is None or (isinstance(cc_norm, float) and pd.isna(cc_norm)):
+            return None
+        ts = prev_purchase_by_client.get(str(cc_norm))
+        if ts is None or (isinstance(ts, float) and pd.isna(ts)):
+            return None
+        return prev_purchase_ts_to_period_label(pd.Timestamp(ts))
+
+    work_with_code["period_label"] = work_with_code[client_norm_col].map(_period_for_row)
+    merged_in_base = work_with_code[work_with_code["period_label"].notna()].copy()
+    new_clients = work_with_code[work_with_code["period_label"].isna()].copy()
+
+    def _one_metric(
+        metric_col: str,
+        agg: Literal["sum", "nunique"],
+        in_base: pd.DataFrame,
+        no_bk: pd.DataFrame,
+        new: pd.DataFrame,
+    ) -> pd.DataFrame:
+        parts = []
+        if not in_base.empty:
+            if agg == "sum":
+                by_period = in_base.groupby("period_label", as_index=False)[metric_col].sum()
+            else:
+                by_period = in_base.groupby("period_label", as_index=False)[COL_CLIENT_CODE].nunique()
+            by_period = by_period.rename(columns={"period_label": "month_label"})
+            by_period.columns = ["month_label", "value"]
+            parts.append(by_period)
+        if not new.empty:
+            if agg == "sum":
+                val = new[metric_col].sum()
+            else:
+                val = new[COL_CLIENT_CODE].nunique()
+            parts.append(pd.DataFrame([{"month_label": LABEL_NEW_CLIENTS, "value": val}]))
+        if not no_bk.empty:
+            if agg == "sum":
+                val = no_bk[metric_col].sum()
+            else:
+                val = 0
+            parts.append(pd.DataFrame([{"month_label": LABEL_NO_BONUS_CARD, "value": val}]))
+        if not parts:
+            return empty_df.copy()
+        combined = pd.concat(parts, ignore_index=True)
+        total = combined["value"].sum()
+        if agg == "nunique":
+            total = combined.loc[combined["month_label"] != LABEL_NO_BONUS_CARD, "value"].sum()
+        combined["pct"] = 0.0
+        if total and total > 0:
+            mask = combined["month_label"] != LABEL_NO_BONUS_CARD if agg == "nunique" else slice(None)
+            combined.loc[mask, "pct"] = (combined.loc[mask, "value"] / total * 100).round(1)
+        return combined.sort_values("value", ascending=False).reset_index(drop=True)
+
+    period_to_clients: Dict[str, List[str]] = {}
+    if not merged_in_base.empty:
+        period_to_clients = merged_in_base.groupby("period_label")[COL_CLIENT_CODE].apply(
+            lambda s: [str(x) for x in s.unique().tolist()]
+        ).to_dict()
+    if not new_clients.empty:
+        period_to_clients[LABEL_NEW_CLIENTS] = [
+            str(x) for x in new_clients[COL_CLIENT_CODE].unique().tolist()
+        ]
+    period_to_clients[LABEL_NO_BONUS_CARD] = []
+
+    tables = {
+        "Продажи": _one_metric(UPLOAD_COL_SALES, "sum", merged_in_base, work_empty, new_clients),
+        "Чеки": _one_metric(UPLOAD_COL_RECEIPTS, "sum", merged_in_base, work_empty, new_clients),
+        "Товар в шт.": _one_metric(UPLOAD_COL_ITEMS, "sum", merged_in_base, work_empty, new_clients),
+        "Клиенты": _one_metric(COL_CLIENT_CODE, "nunique", merged_in_base, work_empty, new_clients),
+    }
+    return (tables, period_to_clients)

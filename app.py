@@ -1,39 +1,43 @@
 """
 Recency Contribution Matrix — Streamlit.
-Режим «только base»: круговая по реценси из базы (клиенты или единицы).
-Режим «база + загрузка»: загрузка файла с выручкой/штуками → круговая по реценси.
+Период из календаря, категории из файлов окна (Группа1–3),
+предыдущая покупка — по всей истории base до начала периода.
 """
 
 import html
 import sys
+from datetime import date
 from pathlib import Path
 
-# Чтобы импорт src работал при запуске из корня репозитория (Streamlit Cloud и др.)
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import pandas as pd
 import streamlit as st
 import streamlit.components.v1 as components
-import plotly.express as px
 import plotly.graph_objects as go
 
-from src.load_base import get_last_purchase_table
+from src.base_period import (
+    COL_CLIENT,
+    COL_G1,
+    COL_G2,
+    COL_G3,
+    filter_window_by_categories,
+    list_sales_files,
+    load_window_dataframe,
+    normalize_client_code,
+    parse_year_month_from_filename,
+    scan_previous_purchase_dates,
+    sorted_unique_non_empty,
+)
 from src.recency_contribution import (
-    CATEGORY_COLUMNS,
     LABEL_NO_BONUS_CARD,
-    contribution_from_base,
-    contribution_from_upload,
-    contribution_tables_from_upload,
-    normalize_upload_columns,
-    UPLOAD_REQUIRED_COLUMNS,
-    _filter_by_categories,
+    contribution_tables_from_prev_purchase,
 )
 
 BASE_DIR = Path(__file__).resolve().parent / "base"
 
 
 def _fmt_num(x) -> str:
-    """Форматирует число с пробелом в качестве разделителя тысяч: 3658837.22 → 3 658 837.22"""
     if pd.isna(x):
         return ""
     if isinstance(x, float) and x == int(x):
@@ -43,13 +47,12 @@ def _fmt_num(x) -> str:
 
 
 def _table_html(data_rows: list[tuple], total_fmt: str) -> str:
-    """Таблица на 3 столбца: Месяц, Вклад (ABC), Вклад %. Закреплённые Итого и заголовки."""
     total_fmt = html.escape(total_fmt)
     cell_style = "padding: 8px 12px; border: 1px solid #ccc;"
     rows_html_parts = []
     for month, abs_val, pct in data_rows:
         rows_html_parts.append(
-            f'<tr>'
+            f"<tr>"
             f'<td style="{cell_style}">{html.escape(month)}</td>'
             f'<td style="{cell_style} text-align: right;">{html.escape(abs_val)}</td>'
             f'<td style="{cell_style} text-align: right;">{html.escape(pct)}</td></tr>'
@@ -73,7 +76,7 @@ def _table_html(data_rows: list[tuple], total_fmt: str) -> str:
     <td style="{cell_style} text-align: center; color: #000; vertical-align: middle;">100 %</td>
   </tr>
   <tr style="color: #000; {sticky_row2}">
-    <th style="{cell_style} text-align: center; color: #000; vertical-align: middle;">Месяц</th>
+    <th style="{cell_style} text-align: center; color: #000; vertical-align: middle;">Период реценси</th>
     <th style="{cell_style} text-align: center; color: #000; vertical-align: middle;">Вклад (ABC)</th>
     <th style="{cell_style} text-align: center; color: #000; vertical-align: middle;">Вклад %</th>
   </tr>
@@ -86,9 +89,8 @@ def _table_html(data_rows: list[tuple], total_fmt: str) -> str:
 
 
 def _copy_codes_block_html(text_to_copy: str, block_id: str) -> str:
-    """HTML: скрытый textarea и кнопка в стиле скриншота (не белая), эмодзи список."""
     escaped = html.escape(text_to_copy)
-    return f'''
+    return f"""
 <style>
 #copy_btn_{block_id} {{ transition: background 0.2s ease, box-shadow 0.2s ease, transform 0.2s ease; }}
 #copy_btn_{block_id}:hover {{ background: #d8d8d8 !important; box-shadow: 0 2px 6px rgba(0,0,0,0.12); transform: scale(1.02); }}
@@ -131,182 +133,230 @@ def _copy_codes_block_html(text_to_copy: str, block_id: str) -> str:
   }};
 }})();
 </script>
-'''
+"""
+
+
+def _count_history_files(base_dir: Path, window_start: date) -> int:
+    """Число файлов, которые будут прочитаны при скане истории (оценка)."""
+    y0, m0 = window_start.year, window_start.month
+    n = 0
+    for p in list_sales_files(base_dir):
+        ym = parse_year_month_from_filename(p.name)
+        if ym is None:
+            n += 1
+        elif (ym[0], ym[1]) <= (y0, m0):
+            n += 1
+    return n
 
 
 st.set_page_config(page_title="Recency Contribution", layout="wide")
-st.title("⏳ Матрица вклада в период по давности последней покупки")
+st.title("⏳ Матрица вклада в период по давности предыдущей покупки")
 
-use_upload = st.radio(
-    "Режим",
-    ["Только база (base)", "База + загружаемый документ"],
-    horizontal=True,
+st.markdown(
+    """
+**Как работает:** в окне анализа берутся продажи с выбранными **Группа1–3** (списки строятся только из файлов, пересекающихся с периодом).  
+Для каждого клиента период реценси = **месяц последней покупки до начала окна** (по всем категориям во всей папке `base/`).  
+Клиенты без покупок до начала окна попадают в **«Новые клиенты»**.
+"""
 )
 
-if use_upload == "Только база (base)":
-    metric = st.selectbox(
-        "Метрика для круговой диаграммы",
-        ["clients", "units"],
-        format_func=lambda x: "Число клиентов" if x == "clients" else "Сумма «Клиентов» (единицы)",
-    )
-    if st.button("Сканировать базу и построить диаграмму"):
-        with st.spinner("Сканирую base..."):
-            df = contribution_from_base(base_dir=BASE_DIR, metric=metric)
-        if df.empty:
-            st.warning("Нет данных в папке base или не найден ожидаемый формат Excel.")
-        else:
-            st.dataframe(df, use_container_width=True)
-            fig = px.pie(
-                df,
-                values="value",
-                names="month_label",
-                title="Вклад по месяцу последней покупки",
-            )
-            fig.update_traces(textposition="inside", textinfo="percent+label")
-            st.plotly_chart(fig, use_container_width=True)
+col_d1, col_d2 = st.columns(2)
+with col_d1:
+    d_from = st.date_input("Начало периода анализа", value=date.today(), key="d_from")
+with col_d2:
+    d_to = st.date_input("Конец периода анализа", value=date.today(), key="d_to")
 
-else:
-    uploaded = st.file_uploader(
-        "Загрузите файл (Excel или CSV) с колонками: Группа1, Продажи, Количество чеков, Количество товар, Код клиента",
-        type=["xlsx", "xls", "csv"],
-    )
-    if uploaded is not None:
-        try:
-            if uploaded.name.endswith(".csv"):
-                df_upload = pd.read_csv(uploaded)
-            else:
-                df_upload = pd.read_excel(uploaded, engine="openpyxl")
-        except Exception as e:
-            st.error(f"Ошибка чтения файла: {e}")
-            df_upload = None
-        else:
-            df_upload = normalize_upload_columns(df_upload)
-            missing = [c for c in UPLOAD_REQUIRED_COLUMNS if c not in df_upload.columns]
-            if missing:
-                st.error(f"В файле не хватает колонок: {missing}. Ожидаются: {UPLOAD_REQUIRED_COLUMNS}")
-            else:
-                category_cols_present = [c for c in CATEGORY_COLUMNS if c in df_upload.columns]
-                category_options = []
-                for col in category_cols_present:
-                    category_options.extend(df_upload[col].dropna().astype(str).str.strip().unique().tolist())
-                category_options = sorted(set(category_options))
-                selected_categories = st.multiselect(
-                    "Строить по категориям (Группа1/2/3/4, Товар). Пусто — по всем.",
-                    options=category_options,
-                    default=[],
-                    key="report_categories",
-                )
-                category_filter = selected_categories if selected_categories else None
+if d_from > d_to:
+    st.error("Начало периода не может быть позже конца.")
+    st.stop()
 
-                if st.button("Построить диаграммы"):
-                    with st.spinner("Загружаю реценси из base и считаю вклад по 4 метрикам..."):
-                        df_last = get_last_purchase_table(BASE_DIR)
-                        if df_last.empty:
-                            st.warning("База (base) пуста или не найдена. Сначала добавьте Excel-файлы в base.")
-                        else:
-                            tables, period_to_clients = contribution_tables_from_upload(
-                                df_upload,
-                                df_last,
-                                category_filter=category_filter,
-                            )
-                            has_data = any(not t.empty for t in tables.values())
-                            if not has_data:
-                                st.warning("Нет пересечения кодов клиентов между загрузкой и базой.")
-                            else:
-                                work = _filter_by_categories(df_upload, selected_categories) if selected_categories else df_upload
-                                upload_totals = {
-                                    "Продажи": float(work["Продажи"].sum()),
-                                    "Чеки": float(work["Количество чеков"].sum()),
-                                    "Товар в шт.": float(work["Количество товар"].sum()),
-                                    "Клиенты": int(work["Код клиента"].nunique()),
-                                }
-                                st.session_state["contribution_tables"] = tables
-                                st.session_state["upload_totals"] = upload_totals
-                                st.session_state["period_to_clients"] = period_to_clients
+n_xlsx = len(list_sales_files(BASE_DIR))
+st.caption(f"В папке `base/`: **{n_xlsx}** Excel-файл(ов).")
 
-                if "contribution_tables" in st.session_state and "upload_totals" in st.session_state and "period_to_clients" in st.session_state:
-                    tables = st.session_state["contribution_tables"]
-                    upload_totals = st.session_state["upload_totals"]
-                    period_to_clients = st.session_state["period_to_clients"]
-                    tab_names = ["Вклад в выручку", "Вклад в чеки", "Вклад в товар", "Вклад клиентов"]
-                    metric_keys = ["Продажи", "Чеки", "Товар в шт.", "Клиенты"]
-                    tabs = st.tabs(tab_names)
-                    for tab, metric_key in zip(tabs, metric_keys):
-                        df_metric = tables.get(metric_key)
-                        if df_metric is None or df_metric.empty:
-                            with tab:
-                                st.info("Нет данных по этой метрике.")
-                            continue
-                        with tab:
-                            col_table, col_chart = st.columns([1, 1.4])
-                            with col_table:
-                                total_value = df_metric["value"].sum()
-                                total_fmt = _fmt_num(total_value)
-                                data_df = df_metric.copy()
-                                data_df["pct"] = data_df["pct"].apply(lambda x: f"{x} %")
-                                data_df["value_fmt"] = data_df["value"].apply(_fmt_num)
-                                data_rows = [
-                                    (str(row["month_label"]), row["value_fmt"], row["pct"])
-                                    for _, row in data_df.iterrows()
-                                ]
-                                table_markup = _table_html(data_rows, total_fmt)
-                                st.markdown(table_markup, unsafe_allow_html=True)
-                            with col_chart:
-                                fig = go.Figure(data=[go.Pie(
-                                    labels=df_metric["month_label"],
-                                    values=df_metric["value"],
-                                    hole=0.6,
-                                    textinfo="label+percent",
-                                    textposition="inside",
-                                    insidetextorientation="radial",
-                                    showlegend=False,
-                                    textfont=dict(size=12),
-                                    automargin=True,
-                                )])
-                                total_str = _fmt_num(upload_totals[metric_key])
-                                fig.add_annotation(
-                                    text=total_str,
-                                    x=0.5, y=0.5, showarrow=False,
-                                    font=dict(size=24, color="gray"),
-                                )
-                                fig.update_layout(
-                                    height=500,
-                                    margin=dict(t=20, b=20, l=20, r=20),
-                                    uniformtext=dict(minsize=10, mode="hide"),
-                                )
-                                st.plotly_chart(fig, use_container_width=True)
-                            # Ниже: блок «Коды клиентов» — выбор периода и кнопка копирования
-                            st.markdown("---")
-                            st.subheader("👥 Коды клиентов")
-                            month_options = [
-                                str(m) for m in df_metric["month_label"]
-                                if str(m) != LABEL_NO_BONUS_CARD
-                            ]
-                            if month_options:
-                                st.caption("Выберите группу клиентов для копирования кодов клиента")
-                                col_sel, _ = st.columns([1, 3])
-                                with col_sel:
-                                    sel_key = f"month_sel_{metric_key.replace(' ', '_').replace('.', '_')}"
-                                    selected_month = st.selectbox(
-                                        "Месяц",
-                                        options=month_options,
-                                        key=sel_key,
-                                        label_visibility="collapsed",
-                                    )
-                                    codes = period_to_clients.get(selected_month, [])
-                                    def _fmt_code(c):
-                                        try:
-                                            f = float(c)
-                                            return str(int(f)) if f == int(f) else str(c)
-                                        except (ValueError, TypeError):
-                                            return str(c)
-                                    text_to_copy = "\n".join(_fmt_code(c) for c in codes)
-                                    block_id = sel_key
-                                    copy_html = _copy_codes_block_html(text_to_copy, block_id)
-                                    components.html(copy_html, height=52)
-                            else:
-                                st.caption("Нет периодов для выбора кодов (кроме «Клиенты без БК»).")
-    else:
-        st.info(
-            "Загрузите файл с колонками: Группа1, Продажи, Количество чеков, Количество товар, Код клиента."
+if st.button("Загрузить категории по периоду", type="secondary"):
+    with st.spinner("Читаю файлы, пересекающиеся с выбранными датами…"):
+        df_win, warns, files_read = load_window_dataframe(BASE_DIR, d_from, d_to)
+    st.session_state["window_df"] = df_win
+    st.session_state["window_d_from"] = d_from
+    st.session_state["window_d_to"] = d_to
+    st.session_state.pop("contribution_tables", None)
+    st.session_state.pop("upload_totals", None)
+    st.session_state.pop("period_to_clients", None)
+    if df_win.empty:
+        st.warning(
+            "Нет строк в выбранном периоде. Проверьте даты и формат файлов "
+            "(нужны колонки: Группа1–3, Дата, Продажи, Количество чеков, Количество товар, Код клиента)."
         )
+    else:
+        st.success(
+            f"Загружено **{len(df_win):,}** строк из **{files_read}** файла(ов). "
+            "Выберите категории и нажмите **Посчитать**."
+        )
+    for w in warns:
+        st.caption(f"⚠ {w}")
+
+# Предупреждение, если даты изменились после загрузки окна
+if "window_df" in st.session_state:
+    if (
+        st.session_state.get("window_d_from") != d_from
+        or st.session_state.get("window_d_to") != d_to
+    ):
+        st.warning("Даты периода изменились — нажмите **Загрузить категории по периоду** снова.")
+
+if "window_df" not in st.session_state or st.session_state["window_df"].empty:
+    st.info(
+        "1) Укажите даты периода анализа. 2) Нажмите **Загрузить категории по периоду**. "
+        "3) Выберите Группа1–3. 4) **Посчитать** (долго: сканируется вся история до начала периода)."
+    )
+    st.stop()
+
+df_cat = st.session_state["window_df"]
+if st.session_state.get("window_d_from") != d_from or st.session_state.get("window_d_to") != d_to:
+    st.stop()
+
+ALL = "(все)"
+
+opts_g1 = [ALL] + sorted_unique_non_empty(df_cat[COL_G1])
+sel1 = st.selectbox("Группа1", options=opts_g1, key="sel_g1")
+df_g1 = df_cat if sel1 == ALL else df_cat[df_cat[COL_G1] == sel1]
+opts_g2 = [ALL] + sorted_unique_non_empty(df_g1[COL_G2])
+sel2 = st.selectbox("Группа2", options=opts_g2, key="sel_g2")
+df_g2 = df_g1 if sel2 == ALL else df_g1[df_g1[COL_G2] == sel2]
+opts_g3 = [ALL] + sorted_unique_non_empty(df_g2[COL_G3])
+sel3 = st.selectbox("Группа3", options=opts_g3, key="sel_g3")
+
+g1_f = None if sel1 == ALL else sel1
+g2_f = None if sel2 == ALL else sel2
+g3_f = None if sel3 == ALL else sel3
+
+hist_n = _count_history_files(BASE_DIR, d_from)
+st.warning(
+    f"**Посчитать** выполнит полный проход по истории: будет прочитано до **~{hist_n}** файла(ов) "
+    f"(все месяцы до **{d_from}** включительно по датам внутри месяца начала). "
+    "На больших объёмах это может занять **много минут** — не закрывайте вкладку."
+)
+
+if st.button("Посчитать", type="primary"):
+    df_work = filter_window_by_categories(df_cat, g1_f, g2_f, g3_f)
+    mask_win = (
+        pd.to_datetime(df_work["Дата"], errors="coerce").dt.date >= d_from
+    ) & (pd.to_datetime(df_work["Дата"], errors="coerce").dt.date <= d_to)
+    df_work = df_work.loc[mask_win].copy()
+    if df_work.empty:
+        st.warning("После фильтра по датам и категориям нет строк. Измените период или категории.")
+        st.stop()
+    df_work["_client_norm"] = df_work[COL_CLIENT].map(normalize_client_code)
+    clients_set = set(df_work["_client_norm"].dropna().astype(str))
+
+    progress = st.progress(0)
+    status = st.empty()
+
+    def _cb(cur: int, total: int, name: str):
+        progress.progress(cur / max(total, 1))
+        status.caption(f"Скан истории: файл **{cur}/{total}** — `{name}`")
+
+    with st.spinner("Ищу предыдущие покупки по всей base…"):
+        prev_map = scan_previous_purchase_dates(BASE_DIR, clients_set, d_from, progress=_cb)
+    progress.empty()
+    status.empty()
+
+    tables, period_to_clients = contribution_tables_from_prev_purchase(df_work, prev_map)
+    upload_totals = {
+        "Продажи": float(df_work["Продажи"].sum()),
+        "Чеки": float(df_work["Количество чеков"].sum()),
+        "Товар в шт.": float(df_work["Количество товар"].sum()),
+        "Клиенты": int(df_work[COL_CLIENT].nunique()),
+    }
+    st.session_state["contribution_tables"] = tables
+    st.session_state["upload_totals"] = upload_totals
+    st.session_state["period_to_clients"] = period_to_clients
+    st.success("Готово.")
+
+if "contribution_tables" not in st.session_state:
+    st.stop()
+
+tables = st.session_state["contribution_tables"]
+upload_totals = st.session_state["upload_totals"]
+period_to_clients = st.session_state["period_to_clients"]
+
+tab_names = ["Вклад в выручку", "Вклад в чеки", "Вклад в товар", "Вклад клиентов"]
+metric_keys = ["Продажи", "Чеки", "Товар в шт.", "Клиенты"]
+tabs = st.tabs(tab_names)
+for tab, metric_key in zip(tabs, metric_keys):
+    df_metric = tables.get(metric_key)
+    if df_metric is None or df_metric.empty:
+        with tab:
+            st.info("Нет данных по этой метрике.")
+        continue
+    with tab:
+        col_table, col_chart = st.columns([1, 1.4])
+        with col_table:
+            total_value = df_metric["value"].sum()
+            total_fmt = _fmt_num(total_value)
+            data_df = df_metric.copy()
+            data_df["pct"] = data_df["pct"].apply(lambda x: f"{x} %")
+            data_df["value_fmt"] = data_df["value"].apply(_fmt_num)
+            data_rows = [
+                (str(row["month_label"]), row["value_fmt"], row["pct"])
+                for _, row in data_df.iterrows()
+            ]
+            st.markdown(_table_html(data_rows, total_fmt), unsafe_allow_html=True)
+        with col_chart:
+            fig = go.Figure(
+                data=[
+                    go.Pie(
+                        labels=df_metric["month_label"],
+                        values=df_metric["value"],
+                        hole=0.6,
+                        textinfo="label+percent",
+                        textposition="inside",
+                        insidetextorientation="radial",
+                        showlegend=False,
+                        textfont=dict(size=12),
+                        automargin=True,
+                    )
+                ]
+            )
+            total_str = _fmt_num(upload_totals[metric_key])
+            fig.add_annotation(
+                text=total_str,
+                x=0.5,
+                y=0.5,
+                showarrow=False,
+                font=dict(size=24, color="gray"),
+            )
+            fig.update_layout(
+                height=500,
+                margin=dict(t=20, b=20, l=20, r=20),
+                uniformtext=dict(minsize=10, mode="hide"),
+            )
+            st.plotly_chart(fig, use_container_width=True)
+        st.markdown("---")
+        st.subheader("👥 Коды клиентов")
+        month_options = [
+            str(m) for m in df_metric["month_label"] if str(m) != LABEL_NO_BONUS_CARD
+        ]
+        if month_options:
+            st.caption("Выберите группу (период реценси) для копирования кодов")
+            col_sel, _ = st.columns([1, 3])
+            with col_sel:
+                sel_key = f"month_sel_{metric_key.replace(' ', '_').replace('.', '_')}"
+                selected_month = st.selectbox(
+                    "Период",
+                    options=month_options,
+                    key=sel_key,
+                    label_visibility="collapsed",
+                )
+                codes = period_to_clients.get(selected_month, [])
+
+                def _fmt_code(c):
+                    try:
+                        f = float(c)
+                        return str(int(f)) if f == int(f) else str(c)
+                    except (ValueError, TypeError):
+                        return str(c)
+
+                text_to_copy = "\n".join(_fmt_code(c) for c in codes)
+                components.html(_copy_codes_block_html(text_to_copy, sel_key), height=52)
+        else:
+            st.caption("Нет периодов для выбора кодов (кроме «Клиенты без БК»).")

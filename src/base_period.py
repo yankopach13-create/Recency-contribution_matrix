@@ -1,0 +1,309 @@
+"""
+Работа с Excel в base по периодам: разбор имён файлов (год + русский месяц),
+загрузка оконных данных для категорий и полный скан истории для «предыдущей покупки».
+"""
+
+from __future__ import annotations
+
+import re
+import calendar
+from datetime import date, datetime
+from pathlib import Path
+from typing import Callable, Dict, List, Optional, Set, Tuple
+
+import pandas as pd
+
+# Колонки в новом формате base
+COL_G1 = "Группа1"
+COL_G2 = "Группа2"
+COL_G3 = "Группа3"
+COL_DATE = "Дата"
+COL_SALES = "Продажи"
+COL_RECEIPTS = "Количество чеков"
+COL_ITEMS = "Количество товар"
+COL_CLIENT = "Код клиента"
+
+SALES_REQUIRED = [COL_G1, COL_G2, COL_G3, COL_DATE, COL_SALES, COL_RECEIPTS, COL_ITEMS, COL_CLIENT]
+
+COL_ALIASES = {"Количество товара": COL_ITEMS}
+
+RU_MONTH_TO_NUM = {
+    "январь": 1,
+    "февраль": 2,
+    "март": 3,
+    "апрель": 4,
+    "май": 5,
+    "июнь": 6,
+    "июль": 7,
+    "август": 8,
+    "сентябрь": 9,
+    "октябрь": 10,
+    "ноябрь": 11,
+    "декабрь": 12,
+}
+
+# «2024 январь», «2024 январь 2», «prefix 2024 январь»
+_YEAR_MONTH_RE = re.compile(
+    r"(\d{4})\s*(январь|февраль|март|апрель|май|июнь|июль|август|сентябрь|октябрь|ноябрь|декабрь)",
+    re.IGNORECASE,
+)
+
+
+def parse_year_month_from_filename(name: str) -> Optional[Tuple[int, int]]:
+    """
+    Из имени файла извлекает (год, месяц), если есть шаблон «YYYY русский_месяц».
+    """
+    stem = Path(name).stem
+    m = _YEAR_MONTH_RE.search(stem.lower())
+    if not m:
+        return None
+    y, mon = int(m.group(1)), RU_MONTH_TO_NUM[m.group(2).lower()]
+    return (y, mon)
+
+
+def _month_start(y: int, m: int) -> date:
+    return date(y, m, 1)
+
+
+def _month_end(y: int, m: int) -> date:
+    return date(y, m, calendar.monthrange(y, m)[1])
+
+
+def month_range_intersects_window(y: int, m: int, d_from: date, d_to: date) -> bool:
+    """Календарный месяц (y,m) пересекается с [d_from, d_to]."""
+    start = _month_start(y, m)
+    end = _month_end(y, m)
+    return start <= d_to and end >= d_from
+
+
+def normalize_client_code(x) -> Optional[str]:
+    """Единый вид кода клиента для множеств и джойнов."""
+    if pd.isna(x):
+        return None
+    s = str(x).strip()
+    if not s:
+        return None
+    try:
+        f = float(s.replace(",", "."))
+        if f == int(f):
+            return str(int(f))
+    except (ValueError, TypeError):
+        pass
+    return s
+
+
+def _strip_columns(df: pd.DataFrame) -> pd.DataFrame:
+    df = df.copy()
+    df.columns = df.columns.astype(str).str.strip()
+    for a, c in COL_ALIASES.items():
+        if a in df.columns and c not in df.columns:
+            df = df.rename(columns={a: c})
+    return df
+
+
+def load_sales_excel(path: Path) -> Optional[pd.DataFrame]:
+    """
+    Читает один Excel с полным набором колонок продаж.
+    Возвращает None, если формат не подходит.
+    """
+    try:
+        df = pd.read_excel(path, engine="openpyxl")
+    except Exception:
+        return None
+    df = _strip_columns(df)
+    if not all(c in df.columns for c in SALES_REQUIRED):
+        return None
+    df = df[SALES_REQUIRED].copy()
+    df[COL_DATE] = pd.to_datetime(df[COL_DATE], dayfirst=True, errors="coerce")
+    for c in (COL_SALES, COL_RECEIPTS, COL_ITEMS):
+        df[c] = pd.to_numeric(df[c], errors="coerce").fillna(0)
+    df[COL_G1] = df[COL_G1].astype(str).str.strip()
+    df[COL_G2] = df[COL_G2].astype(str).str.strip()
+    df[COL_G3] = df[COL_G3].astype(str).str.strip()
+    return df
+
+
+def load_sales_excel_minimal(path: Path, cols: List[str]) -> Optional[pd.DataFrame]:
+    """Читает только указанные колонки (для ускорения скана истории)."""
+    try:
+        df = pd.read_excel(path, engine="openpyxl", usecols=cols)
+    except Exception:
+        try:
+            df = pd.read_excel(path, engine="openpyxl")
+        except Exception:
+            return None
+    df = _strip_columns(df)
+    missing = [c for c in cols if c not in df.columns]
+    if missing:
+        return None
+    return df[cols].copy()
+
+
+def list_sales_files(base_dir: Path) -> List[Path]:
+    paths = []
+    if not base_dir.is_dir():
+        return paths
+    for ext in ("*.xlsx", "*.xls"):
+        paths.extend(sorted(base_dir.glob(ext)))
+    return paths
+
+
+def classify_files(base_dir: Path) -> List[Tuple[Path, Optional[Tuple[int, int]]]]:
+    """Список (путь, (год, месяц) или None)."""
+    out = []
+    for p in list_sales_files(base_dir):
+        ym = parse_year_month_from_filename(p.name)
+        out.append((p, ym))
+    return out
+
+
+def paths_for_window(
+    classified: List[Tuple[Path, Optional[Tuple[int, int]]]], d_from: date, d_to: date
+) -> List[Path]:
+    """Файлы, чей календарный месяц пересекает окно анализа; без распознанного месяца — читаем и фильтруем по дате."""
+    need_scan: List[Path] = []
+    for path, ym in classified:
+        if ym is not None:
+            if month_range_intersects_window(ym[0], ym[1], d_from, d_to):
+                need_scan.append(path)
+        else:
+            need_scan.append(path)
+    return need_scan
+
+
+def row_date_in_window(ts, d_from: date, d_to: date) -> bool:
+    if pd.isna(ts):
+        return False
+    d = pd.Timestamp(ts).date()
+    return d_from <= d <= d_to
+
+
+def load_window_dataframe(
+    base_dir: Path, d_from: date, d_to: date
+) -> Tuple[pd.DataFrame, List[str], int]:
+    """
+    Объединяет все строки из файлов окна, у которых Дата попадает в [d_from, d_to].
+    Возвращает (df, warnings, files_read).
+    """
+    warnings: List[str] = []
+    classified = classify_files(base_dir)
+    paths = paths_for_window(classified, d_from, d_to)
+    frames = []
+    files_read = 0
+    ym_by_path = {p: ym for p, ym in classified}
+
+    for path in paths:
+        df = load_sales_excel(path)
+        if df is None:
+            try:
+                pd.read_excel(path, engine="openpyxl", nrows=0)
+                warnings.append(f"Пропуск (нет нужных колонок): {path.name}")
+            except Exception:
+                warnings.append(f"Не прочитан: {path.name}")
+            continue
+        if df.empty:
+            continue
+        files_read += 1
+        ym = ym_by_path.get(path)
+        if ym is not None and month_range_intersects_window(ym[0], ym[1], d_from, d_to):
+            sub = df[row_date_in_window(df[COL_DATE], d_from, d_to)]
+        else:
+            sub = df[row_date_in_window(df[COL_DATE], d_from, d_to)]
+            if sub.empty and not df.empty:
+                warnings.append(
+                    f"Файл без года/месяца в имени «{path.name}»: отобраны только строки в окне дат."
+                )
+        if not sub.empty:
+            sub = sub.copy()
+            sub["_source_file"] = path.name
+            frames.append(sub)
+
+    if not frames:
+        return pd.DataFrame(), warnings, files_read
+    out = pd.concat(frames, ignore_index=True)
+    return out, warnings, files_read
+
+
+def _date_strictly_before_start(ts, window_start: date) -> bool:
+    if pd.isna(ts):
+        return False
+    return pd.Timestamp(ts).date() < window_start
+
+
+def scan_previous_purchase_dates(
+    base_dir: Path,
+    client_codes: Set[str],
+    window_start: date,
+    progress: Optional[Callable[[int, int, str], None]] = None,
+) -> Dict[str, pd.Timestamp]:
+    """
+    Для каждого кода из client_codes — максимальная дата покупки строго раньше window_start
+    по всем файлам base (любые категории).
+    """
+    if not client_codes:
+        return {}
+    classified = classify_files(base_dir)
+    y0, m0 = window_start.year, window_start.month
+    prev: Dict[str, pd.Timestamp] = {}
+    n_files = len(classified)
+    for idx, (path, ym) in enumerate(classified):
+        if progress:
+            progress(idx + 1, n_files, path.name)
+        skip_entire = False
+        if ym is not None:
+            fy, fm = ym
+            if (fy, fm) > (y0, m0):
+                skip_entire = True
+            elif (fy, fm) < (y0, m0):
+                need_filter_before = False
+            else:
+                need_filter_before = True
+        else:
+            need_filter_before = True
+
+        if skip_entire:
+            continue
+
+        df = load_sales_excel_minimal(path, [COL_DATE, COL_CLIENT])
+        if df is None or df.empty:
+            continue
+        df[COL_DATE] = pd.to_datetime(df[COL_DATE], dayfirst=True, errors="coerce")
+        df = df.dropna(subset=[COL_DATE])
+        codes = df[COL_CLIENT].map(normalize_client_code)
+        df = df.assign(_cc=codes)
+        df = df[df["_cc"].notna() & df["_cc"].isin(client_codes)]
+        if df.empty:
+            continue
+        if need_filter_before:
+            df = df[_date_strictly_before_start(df[COL_DATE], window_start)]
+        if df.empty:
+            continue
+        for cc, grp in df.groupby("_cc", sort=False):
+            mx = grp[COL_DATE].max()
+            old = prev.get(cc)
+            if old is None or mx > old:
+                prev[cc] = mx
+    return prev
+
+
+def filter_window_by_categories(
+    df: pd.DataFrame,
+    g1: Optional[str],
+    g2: Optional[str],
+    g3: Optional[str],
+) -> pd.DataFrame:
+    """Фильтр по трём группам; None или пустая строка — без фильтра по полю."""
+    out = df
+    if g1 and str(g1).strip():
+        out = out[out[COL_G1] == str(g1).strip()]
+    if g2 and str(g2).strip():
+        out = out[out[COL_G2] == str(g2).strip()]
+    if g3 and str(g3).strip():
+        out = out[out[COL_G3] == str(g3).strip()]
+    return out
+
+
+def sorted_unique_non_empty(series: pd.Series) -> List[str]:
+    s = series.dropna().astype(str).str.strip()
+    s = s[s != ""]
+    return sorted(s.unique().tolist())
