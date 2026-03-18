@@ -204,11 +204,11 @@ def paths_for_window(
     return need_scan
 
 
-def row_date_in_window(ts, d_from: date, d_to: date) -> bool:
-    if pd.isna(ts):
-        return False
-    d = pd.Timestamp(ts).date()
-    return d_from <= d <= d_to
+def mask_rows_date_in_window(date_series: pd.Series, d_from: date, d_to: date) -> pd.Series:
+    """Булева маска: дата в [d_from, d_to] (по календарным датам)."""
+    dt = pd.to_datetime(date_series, errors="coerce")
+    d = dt.dt.date
+    return dt.notna() & (d >= d_from) & (d <= d_to)
 
 
 def load_window_dataframe(
@@ -238,14 +238,11 @@ def load_window_dataframe(
             continue
         files_read += 1
         ym = ym_by_path.get(path)
-        if ym is not None and month_range_intersects_window(ym[0], ym[1], d_from, d_to):
-            sub = df[row_date_in_window(df[COL_DATE], d_from, d_to)]
-        else:
-            sub = df[row_date_in_window(df[COL_DATE], d_from, d_to)]
-            if sub.empty and not df.empty:
-                warnings.append(
-                    f"Файл без года/месяца в имени «{path.name}»: отобраны только строки в окне дат."
-                )
+        sub = df.loc[mask_rows_date_in_window(df[COL_DATE], d_from, d_to)].copy()
+        if ym is None and sub.empty and not df.empty:
+            warnings.append(
+                f"Файл без года/месяца в имени «{path.name}»: отобраны только строки в окне дат."
+            )
         if not sub.empty:
             sub = sub.copy()
             sub["_source_file"] = path.name
@@ -257,10 +254,11 @@ def load_window_dataframe(
     return out, warnings, files_read
 
 
-def _date_strictly_before_start(ts, window_start: date) -> bool:
-    if pd.isna(ts):
-        return False
-    return pd.Timestamp(ts).date() < window_start
+def mask_date_strictly_before_start(date_series: pd.Series, window_start: date) -> pd.Series:
+    """Дата строго раньше calendar window_start."""
+    dt = pd.to_datetime(date_series, errors="coerce")
+    d = dt.dt.date
+    return dt.notna() & (d < window_start)
 
 
 def scan_previous_purchase_dates(
@@ -308,7 +306,7 @@ def scan_previous_purchase_dates(
         if df.empty:
             continue
         if need_filter_before:
-            df = df[_date_strictly_before_start(df[COL_DATE], window_start)]
+            df = df.loc[mask_date_strictly_before_start(df[COL_DATE], window_start)]
         if df.empty:
             continue
         for cc, grp in df.groupby("_cc", sort=False):
