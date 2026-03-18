@@ -40,7 +40,6 @@
       color: #666;
       cursor: not-allowed;
     }
-    .err { font-size: 0.85rem; color: #c00; margin-top: 8px; max-width: 520px; line-height: 1.35; }
     .blocked { font-size: 0.85rem; color: #856404; background: #fff3cd; padding: 8px 10px; border-radius: 6px; margin-top: 8px; max-width: 520px; }
   </style>
 </head>
@@ -63,7 +62,6 @@
   </div>
   <button type="button" id="applyBtn">Сканировать выбранный период</button>
   <div id="blockedMsg" class="blocked" style="display:none;"></div>
-  <div id="errMsg" class="err" style="display:none;"></div>
 
   <script>
     function send(msg) {
@@ -74,12 +72,10 @@
     var boundsMeta = { ok: false };
 
     function frameH() {
-      var h = boundsMeta.ok ? 280 : 300;
-      var err = document.getElementById("errMsg");
-      if (err && err.style.display !== "none") h += 36;
+      var h = boundsMeta.ok ? 260 : 300;
       var bl = document.getElementById("blockedMsg");
       if (bl && bl.style.display !== "none") h += 48;
-      return Math.min(h, 420);
+      return Math.min(h, 400);
     }
 
     function signalReady() {
@@ -131,19 +127,24 @@
       return { y: y, m: m, d: d, iso: toIso(y, m, d) };
     }
 
-    function clearErr() {
-      var e = document.getElementById("errMsg");
-      if (e) { e.style.display = "none"; e.textContent = ""; }
-    }
-
-    function showErr(t) {
-      var e = document.getElementById("errMsg");
-      if (e) { e.textContent = t; e.style.display = "block"; }
-      signalReady();
+    function reportValidationError(msg) {
+      var fd = document.getElementById("fd").value.trim();
+      var fm = document.getElementById("fm").value.trim();
+      var fy = document.getElementById("fy").value.trim();
+      var td = document.getElementById("td").value.trim();
+      var tm = document.getElementById("tm").value.trim();
+      var ty = document.getElementById("ty").value.trim();
+      send({
+        type: "streamlit:setComponentValue",
+        value: {
+          fd: fd, fm: fm, fy: fy, td: td, tm: tm, ty: ty,
+          _nonce: Date.now(),
+          _clientValidationError: msg,
+        },
+      });
     }
 
     function apply() {
-      clearErr();
       var btn = document.getElementById("applyBtn");
       if (!boundsMeta.ok || (btn && btn.disabled)) return;
 
@@ -155,32 +156,34 @@
       var ty = document.getElementById("ty").value.trim();
 
       if (!fd || !fm || !fy || !td || !tm || !ty) {
-        showErr("Заполните все поля (день, месяц, год для начала и конца периода).");
+        reportValidationError(
+          "Заполните все поля (день, месяц, год для начала и конца периода)."
+        );
         return;
       }
       if (fy.length !== 4 || ty.length !== 4) {
-        showErr("Год укажите четырьмя цифрами.");
+        reportValidationError("Год укажите четырьмя цифрами.");
         return;
       }
 
       var a = parseDMY(fd, fm, fy);
       var b = parseDMY(td, tm, ty);
       if (!a) {
-        showErr("Начало периода — такой даты в календаре не существует.");
+        reportValidationError("Начало периода — такой даты в календаре не существует.");
         return;
       }
       if (!b) {
-        showErr("Конец периода — такой даты в календаре не существует.");
+        reportValidationError("Конец периода — такой даты в календаре не существует.");
         return;
       }
       if (a.iso > b.iso) {
-        showErr("Начало периода не может быть позже конца.");
+        reportValidationError("Начало периода не может быть позже конца.");
         return;
       }
 
       var cap = boundsMeta.max <= boundsMeta.today ? boundsMeta.max : boundsMeta.today;
       if (a.iso < boundsMeta.min || b.iso > cap) {
-        showErr(
+        reportValidationError(
           "Период должен быть внутри доступного диапазона base и не позже сегодняшней даты " +
           "(с " + boundsMeta.min.split("-").reverse().join(".") +
           " по " + cap.split("-").reverse().join(".") + ")."
@@ -224,7 +227,6 @@
 
       var blk = document.getElementById("blockedMsg");
       var btn = document.getElementById("applyBtn");
-      clearErr();
       if (!boundsMeta.ok) {
         if (blk) {
           blk.textContent = boundsMeta.reason || "Сканирование недоступно.";

@@ -245,24 +245,31 @@ if isinstance(picked, dict) and picked.get("_nonce") is not None:
     _nonce = picked["_nonce"]
     if _nonce != st.session_state.get("_date_picker_last_nonce"):
         st.session_state["_date_picker_last_nonce"] = _nonce
-        d0 = _date_from_dmy_parts(picked.get("fd"), picked.get("fm"), picked.get("fy"))
-        d1 = _date_from_dmy_parts(picked.get("td"), picked.get("tm"), picked.get("ty"))
+        _cerr = picked.get("_clientValidationError")
+        if _cerr:
+            st.session_state["_date_picker_error"] = str(_cerr)
+            st.session_state["_dsp_prefill"] = {
+                k: str(picked.get(k, "") or "") for k in _date_keys
+            }
+        else:
+            d0 = _date_from_dmy_parts(picked.get("fd"), picked.get("fm"), picked.get("fy"))
+            d1 = _date_from_dmy_parts(picked.get("td"), picked.get("tm"), picked.get("ty"))
 
-        if d0 is None or d1 is None:
+        if not _cerr and (d0 is None or d1 is None):
             st.session_state["_date_picker_error"] = _period_parse_error_message(
                 picked, _date_keys
             )
             st.session_state["_dsp_prefill"] = {
                 k: str(picked.get(k, "") or "") for k in _date_keys
             }
-        elif d0 > d1:
+        elif not _cerr and d0 > d1:
             st.session_state["_date_picker_error"] = (
                 "Начало периода не может быть позже конца."
             )
             st.session_state["_dsp_prefill"] = {
                 k: str(picked.get(k, "") or "") for k in _date_keys
             }
-        else:
+        elif not _cerr:
             _vmsg = validate_user_period_for_scan(d0, d1, _bounds, _today)
             if _vmsg:
                 st.session_state["_date_picker_error"] = _vmsg
@@ -296,7 +303,7 @@ if isinstance(picked, dict) and picked.get("_nonce") is not None:
                     st.caption(f"⚠ {w}")
 
 if st.session_state.get("_date_picker_error"):
-    st.error(st.session_state["_date_picker_error"])
+    st.error(st.session_state["_date_picker_error"], icon="⚠️")
 
 d_from = st.session_state.get("period_d_from")
 d_to = st.session_state.get("period_d_to")
