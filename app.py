@@ -7,7 +7,9 @@ Recency Contribution Matrix — Streamlit.
 import html
 import sys
 from datetime import date
+import calendar
 from pathlib import Path
+from typing import Optional
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
@@ -21,12 +23,14 @@ from src.base_period import (
     COL_G1,
     COL_G2,
     COL_G3,
+    available_date_bounds_from_base_filenames,
     available_period_from_base_filenames,
     filter_window_by_categories,
     load_window_dataframe,
     normalize_client_code,
     scan_previous_purchase_dates,
     sorted_unique_non_empty,
+    validate_user_period_for_scan,
 )
 from date_segment_picker import render_date_segment_picker
 from src.recency_contribution import (
@@ -37,8 +41,11 @@ from src.recency_contribution import (
 BASE_DIR = Path(__file__).resolve().parent / "base"
 
 
-def _date_from_dmy_parts(dd_s, mm_s, yyyy_s):
-    """Собирает date из полей день / месяц / год (только цифры, без точек)."""
+def _date_from_dmy_parts(dd_s, mm_s, yyyy_s) -> Optional[date]:
+    """
+    Календарная дата из полей ДД / ММ / ГГГГ.
+    Несуществующие дни (35.06, 31.02), неверный месяц/год — None.
+    """
     for x in (dd_s, mm_s, yyyy_s):
         if x is None or not str(x).strip():
             return None
@@ -46,12 +53,25 @@ def _date_from_dmy_parts(dd_s, mm_s, yyyy_s):
         d, m, y = int(str(dd_s).strip()), int(str(mm_s).strip()), int(str(yyyy_s).strip())
     except ValueError:
         return None
-    if not (1 <= d <= 31 and 1 <= m <= 12 and 1900 <= y <= 2100):
+    if not (1 <= m <= 12 and 1900 <= y <= 2100):
         return None
-    try:
-        return date(y, m, d)
-    except ValueError:
+    last = calendar.monthrange(y, m)[1]
+    if not (1 <= d <= last):
         return None
+    return date(y, m, d)
+
+
+def _period_parse_error_message(picked: dict, _date_keys: tuple) -> str:
+    """Сообщение, если не удалось разобрать начало или конец периода."""
+    d0 = _date_from_dmy_parts(picked.get("fd"), picked.get("fm"), picked.get("fy"))
+    d1 = _date_from_dmy_parts(picked.get("td"), picked.get("tm"), picked.get("ty"))
+    if d0 is None and d1 is None:
+        return "Проверьте **начало** и **конец** периода: заполните все поля корректными датами."
+    if d0 is None:
+        return "**Начало периода** — некорректная дата (проверьте день, месяц и год)."
+    if d1 is None:
+        return "**Конец периода** — некорректная дата (проверьте день, месяц и год)."
+    return "Начало периода позже конца — исправьте даты."
 
 
 def _fmt_num(x) -> str:
@@ -157,6 +177,9 @@ st.set_page_config(page_title="Recency Contribution", layout="wide")
 st.title("⏳ Матрица вклада в период по давности предыдущей покупки")
 
 _avail = available_period_from_base_filenames(BASE_DIR)
+_bounds = available_date_bounds_from_base_filenames(BASE_DIR)
+_today = date.today()
+
 if _avail:
     st.markdown(f"**Доступный период для анализа:** {_avail}")
 else:
@@ -164,6 +187,36 @@ else:
         "**Доступный период для анализа:** *не определён по именам файлов* "
         "(в имени Excel укажите год и месяц, например `2024 январь.xlsx`)."
     )
+
+if _bounds is None:
+    for _k in (
+        "period_d_from",
+        "period_d_to",
+        "window_df",
+        "window_d_from",
+        "window_d_to",
+        "contribution_tables",
+        "upload_totals",
+        "period_to_clients",
+        "_date_picker_last_nonce",
+    ):
+        st.session_state.pop(_k, None)
+
+if _bounds:
+    _picker_bounds = {
+        "ok": True,
+        "min": _bounds[0].isoformat(),
+        "max": _bounds[1].isoformat(),
+        "today": _today.isoformat(),
+    }
+else:
+    _picker_bounds = {
+        "ok": False,
+        "reason": (
+            "Сканирование недоступно: в имени файлов base нет года и месяца "
+            "(например, «2024 январь.xlsx»)."
+        ),
+    }
 
 st.subheader("Период анализа")
 _date_keys = ("fd", "fm", "fy", "td", "tm", "ty")
@@ -181,7 +234,12 @@ if st.session_state.get("period_d_from") and st.session_state.get("period_d_to")
 elif st.session_state.get("_dsp_prefill"):
     _prefill = dict(st.session_state["_dsp_prefill"])
 
-picked = render_date_segment_picker(key="date_segments", prefill=_prefill, tab_index=0)
+picked = render_date_segment_picker(
+    key="date_segments",
+    prefill=_prefill,
+    tab_index=0,
+    bounds=_picker_bounds,
+)
 
 if isinstance(picked, dict) and picked.get("_nonce") is not None:
     _nonce = picked["_nonce"]
@@ -189,38 +247,53 @@ if isinstance(picked, dict) and picked.get("_nonce") is not None:
         st.session_state["_date_picker_last_nonce"] = _nonce
         d0 = _date_from_dmy_parts(picked.get("fd"), picked.get("fm"), picked.get("fy"))
         d1 = _date_from_dmy_parts(picked.get("td"), picked.get("tm"), picked.get("ty"))
-        if d0 and d1 and d0 <= d1:
-            st.session_state.pop("_date_picker_error", None)
-            st.session_state["period_d_from"] = d0
-            st.session_state["period_d_to"] = d1
-            st.session_state.pop("_dsp_prefill", None)
-            with st.spinner("Читаю файлы, пересекающиеся с выбранными датами…"):
-                df_win, warns, _files_read = load_window_dataframe(BASE_DIR, d0, d1)
-            st.session_state.pop("contribution_tables", None)
-            st.session_state.pop("upload_totals", None)
-            st.session_state.pop("period_to_clients", None)
-            if df_win.empty:
-                st.session_state.pop("window_df", None)
-                st.session_state.pop("window_d_from", None)
-                st.session_state.pop("window_d_to", None)
-                st.warning(
-                    "Нет строк в выбранном периоде. Проверьте даты и формат файлов "
-                    "(нужны колонки: Группа1–3, Дата, Продажи, Количество чеков, "
-                    "Количество товар, Код клиента)."
-                )
-            else:
-                st.session_state["window_df"] = df_win
-                st.session_state["window_d_from"] = d0
-                st.session_state["window_d_to"] = d1
-            for w in warns:
-                st.caption(f"⚠ {w}")
-        else:
-            st.session_state["_date_picker_error"] = (
-                "Некорректные даты или начало периода позже конца."
+
+        if d0 is None or d1 is None:
+            st.session_state["_date_picker_error"] = _period_parse_error_message(
+                picked, _date_keys
             )
             st.session_state["_dsp_prefill"] = {
                 k: str(picked.get(k, "") or "") for k in _date_keys
             }
+        elif d0 > d1:
+            st.session_state["_date_picker_error"] = (
+                "Начало периода не может быть позже конца."
+            )
+            st.session_state["_dsp_prefill"] = {
+                k: str(picked.get(k, "") or "") for k in _date_keys
+            }
+        else:
+            _vmsg = validate_user_period_for_scan(d0, d1, _bounds, _today)
+            if _vmsg:
+                st.session_state["_date_picker_error"] = _vmsg
+                st.session_state["_dsp_prefill"] = {
+                    k: str(picked.get(k, "") or "") for k in _date_keys
+                }
+            else:
+                st.session_state.pop("_date_picker_error", None)
+                st.session_state["period_d_from"] = d0
+                st.session_state["period_d_to"] = d1
+                st.session_state.pop("_dsp_prefill", None)
+                with st.spinner("Читаю файлы, пересекающиеся с выбранными датами…"):
+                    df_win, warns, _files_read = load_window_dataframe(BASE_DIR, d0, d1)
+                st.session_state.pop("contribution_tables", None)
+                st.session_state.pop("upload_totals", None)
+                st.session_state.pop("period_to_clients", None)
+                if df_win.empty:
+                    st.session_state.pop("window_df", None)
+                    st.session_state.pop("window_d_from", None)
+                    st.session_state.pop("window_d_to", None)
+                    st.warning(
+                        "Нет строк в выбранном периоде. Проверьте даты и формат файлов "
+                        "(нужны колонки: Группа1–3, Дата, Продажи, Количество чеков, "
+                        "Количество товар, Код клиента)."
+                    )
+                else:
+                    st.session_state["window_df"] = df_win
+                    st.session_state["window_d_from"] = d0
+                    st.session_state["window_d_to"] = d1
+                for w in warns:
+                    st.caption(f"⚠ {w}")
 
 if st.session_state.get("_date_picker_error"):
     st.error(st.session_state["_date_picker_error"])

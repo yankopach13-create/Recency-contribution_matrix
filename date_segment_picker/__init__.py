@@ -20,14 +20,16 @@ def render_date_segment_picker(
     key: str,
     prefill: Optional[Dict[str, str]] = None,
     tab_index: int = 0,
+    bounds: Optional[Dict[str, Any]] = None,
 ) -> Any:
     """
     После «Сканировать выбранный период» возвращает dict: fd, fm, fy, td, tm, ty, _nonce.
-    prefill — подставить в поля при рендере (не путать с default виджета Streamlit).
+    bounds: ok, min/max/today (ISO) при ok=True; иначе ok=False, reason.
     """
     return date_segment_picker(
         key=key,
         prefill=prefill or {},
+        bounds=bounds or {"ok": False, "reason": "Нет данных для границ периода."},
         default=None,
         tab_index=tab_index,
     )

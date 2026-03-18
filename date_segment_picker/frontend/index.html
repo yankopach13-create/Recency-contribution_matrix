@@ -34,7 +34,14 @@
       border-radius: 8px;
       margin-top: 4px;
     }
-    button:hover { filter: brightness(1.05); }
+    button:hover:not(:disabled) { filter: brightness(1.05); }
+    button:disabled {
+      background: #ccc;
+      color: #666;
+      cursor: not-allowed;
+    }
+    .err { font-size: 0.85rem; color: #c00; margin-top: 8px; max-width: 520px; line-height: 1.35; }
+    .blocked { font-size: 0.85rem; color: #856404; background: #fff3cd; padding: 8px 10px; border-radius: 6px; margin-top: 8px; max-width: 520px; }
   </style>
 </head>
 <body>
@@ -55,6 +62,8 @@
     <input id="ty" class="y4" type="text" inputmode="numeric" maxlength="4" placeholder="ГГГГ" autocomplete="off" />
   </div>
   <button type="button" id="applyBtn">Сканировать выбранный период</button>
+  <div id="blockedMsg" class="blocked" style="display:none;"></div>
+  <div id="errMsg" class="err" style="display:none;"></div>
 
   <script>
     function send(msg) {
@@ -62,12 +71,23 @@
     }
 
     var initialized = false;
+    var boundsMeta = { ok: false };
+
+    function frameH() {
+      var h = boundsMeta.ok ? 280 : 300;
+      var err = document.getElementById("errMsg");
+      if (err && err.style.display !== "none") h += 36;
+      var bl = document.getElementById("blockedMsg");
+      if (bl && bl.style.display !== "none") h += 48;
+      return Math.min(h, 420);
+    }
+
     function signalReady() {
       if (!initialized) {
         initialized = true;
         send({ type: "streamlit:componentReady", apiVersion: 1 });
       }
-      send({ type: "streamlit:setFrameHeight", height: 260 });
+      send({ type: "streamlit:setFrameHeight", height: frameH() });
     }
 
     function digits(el, maxLen) {
@@ -96,16 +116,82 @@
       });
     }
 
+    function pad2(n) { return n < 10 ? "0" + n : String(n); }
+    function toIso(y, m, d) {
+      return y + "-" + pad2(m) + "-" + pad2(d);
+    }
+
+    /** Календарная дата или null (31.02, 35.06 и т.д.) */
+    function parseDMY(dd, mm, yyyy) {
+      var d = parseInt(dd, 10), m = parseInt(mm, 10), y = parseInt(yyyy, 10);
+      if (isNaN(d) || isNaN(m) || isNaN(y)) return null;
+      if (y < 1900 || y > 2100 || m < 1 || m > 12 || d < 1) return null;
+      var dt = new Date(y, m - 1, d);
+      if (dt.getFullYear() !== y || dt.getMonth() !== m - 1 || dt.getDate() !== d) return null;
+      return { y: y, m: m, d: d, iso: toIso(y, m, d) };
+    }
+
+    function clearErr() {
+      var e = document.getElementById("errMsg");
+      if (e) { e.style.display = "none"; e.textContent = ""; }
+    }
+
+    function showErr(t) {
+      var e = document.getElementById("errMsg");
+      if (e) { e.textContent = t; e.style.display = "block"; }
+      signalReady();
+    }
+
     function apply() {
+      clearErr();
+      var btn = document.getElementById("applyBtn");
+      if (!boundsMeta.ok || (btn && btn.disabled)) return;
+
+      var fd = document.getElementById("fd").value.trim();
+      var fm = document.getElementById("fm").value.trim();
+      var fy = document.getElementById("fy").value.trim();
+      var td = document.getElementById("td").value.trim();
+      var tm = document.getElementById("tm").value.trim();
+      var ty = document.getElementById("ty").value.trim();
+
+      if (!fd || !fm || !fy || !td || !tm || !ty) {
+        showErr("Заполните все поля (день, месяц, год для начала и конца периода).");
+        return;
+      }
+      if (fy.length !== 4 || ty.length !== 4) {
+        showErr("Год укажите четырьмя цифрами.");
+        return;
+      }
+
+      var a = parseDMY(fd, fm, fy);
+      var b = parseDMY(td, tm, ty);
+      if (!a) {
+        showErr("Начало периода — такой даты в календаре не существует.");
+        return;
+      }
+      if (!b) {
+        showErr("Конец периода — такой даты в календаре не существует.");
+        return;
+      }
+      if (a.iso > b.iso) {
+        showErr("Начало периода не может быть позже конца.");
+        return;
+      }
+
+      var cap = boundsMeta.max <= boundsMeta.today ? boundsMeta.max : boundsMeta.today;
+      if (a.iso < boundsMeta.min || b.iso > cap) {
+        showErr(
+          "Период должен быть внутри доступного диапазона base и не позже сегодняшней даты " +
+          "(с " + boundsMeta.min.split("-").reverse().join(".") +
+          " по " + cap.split("-").reverse().join(".") + ")."
+        );
+        return;
+      }
+
       send({
         type: "streamlit:setComponentValue",
         value: {
-          fd: document.getElementById("fd").value.trim(),
-          fm: document.getElementById("fm").value.trim(),
-          fy: document.getElementById("fy").value.trim(),
-          td: document.getElementById("td").value.trim(),
-          tm: document.getElementById("tm").value.trim(),
-          ty: document.getElementById("ty").value.trim(),
+          fd: fd, fm: fm, fy: fy, td: td, tm: tm, ty: ty,
           _nonce: Date.now(),
         },
       });
@@ -131,6 +217,25 @@
       if (!ev.data || ev.data.type !== "streamlit:render") return;
       var args = ev.data.args || {};
       var d = args.prefill || {};
+      boundsMeta = args.bounds || { ok: false };
+      if (typeof boundsMeta.min === "string") boundsMeta.min = boundsMeta.min.slice(0, 10);
+      if (typeof boundsMeta.max === "string") boundsMeta.max = boundsMeta.max.slice(0, 10);
+      if (typeof boundsMeta.today === "string") boundsMeta.today = boundsMeta.today.slice(0, 10);
+
+      var blk = document.getElementById("blockedMsg");
+      var btn = document.getElementById("applyBtn");
+      clearErr();
+      if (!boundsMeta.ok) {
+        if (blk) {
+          blk.textContent = boundsMeta.reason || "Сканирование недоступно.";
+          blk.style.display = "block";
+        }
+        if (btn) btn.disabled = true;
+      } else {
+        if (blk) blk.style.display = "none";
+        if (btn) btn.disabled = false;
+      }
+
       ["fd", "fm", "fy", "td", "tm", "ty"].forEach(function (k) {
         var el = document.getElementById(k);
         var v = d[k];
@@ -138,14 +243,14 @@
       });
       signalReady();
       setTimeout(function () {
-        document.getElementById("fd").focus();
+        if (boundsMeta.ok) document.getElementById("fd").focus();
       }, 80);
     });
 
     setTimeout(function () {
       if (!initialized) {
         signalReady();
-        document.getElementById("fd").focus();
+        if (boundsMeta.ok) document.getElementById("fd").focus();
       }
     }, 600);
   </script>

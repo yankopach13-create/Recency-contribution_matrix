@@ -172,6 +172,52 @@ def available_period_from_base_filenames(base_dir: Path) -> Optional[str]:
     return f"{NUM_TO_RU_MONTH[m1]} {y1} — {NUM_TO_RU_MONTH[m2]} {y2}"
 
 
+def available_date_bounds_from_base_filenames(base_dir: Path) -> Optional[Tuple[date, date]]:
+    """
+    Первый день самого раннего и последний день самого позднего месяца
+    по файлам с шаблоном «ГГГГ русский_месяц» в имени. Иначе None.
+    """
+    months: List[Tuple[int, int]] = []
+    for p in list_sales_files(base_dir):
+        ym = parse_year_month_from_filename(p.name)
+        if ym:
+            months.append(ym)
+    if not months:
+        return None
+    months.sort()
+    y1, m1 = months[0]
+    y2, m2 = months[-1]
+    return (_month_start(y1, m1), _month_end(y2, m2))
+
+
+def validate_user_period_for_scan(
+    d_from: date,
+    d_to: date,
+    base_bounds: Optional[Tuple[date, date]],
+    today: date,
+) -> Optional[str]:
+    """
+    Проверка перед сканированием. Возвращает текст ошибки или None.
+    Период должен лежать внутри календарных границ base и не заходить в будущее.
+    """
+    if base_bounds is None:
+        return (
+            "Нельзя определить доступный период base: в имени ни одного Excel нет "
+            "года и русского месяца (пример: «2024 январь.xlsx»)."
+        )
+    b0, b1 = base_bounds
+    if d_from < b0 or d_to > b1:
+        return (
+            f"Период анализа должен полностью находиться внутри доступного диапазона base: "
+            f"с {b0.strftime('%d.%m.%Y')} по {b1.strftime('%d.%m.%Y')}."
+        )
+    if d_from > today or d_to > today:
+        return "Начало и конец периода не могут быть позже сегодняшней даты."
+    if d_from > d_to:
+        return "Начало периода не может быть позже конца."
+    return None
+
+
 def list_sales_files(base_dir: Path) -> List[Path]:
     paths = []
     if not base_dir.is_dir():
