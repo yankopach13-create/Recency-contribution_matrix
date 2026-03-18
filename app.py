@@ -61,6 +61,22 @@ def _date_from_dmy_parts(dd_s, mm_s, yyyy_s) -> Optional[date]:
     return date(y, m, d)
 
 
+def _prefill_after_date_error(
+    picked: dict, _date_keys: tuple, clear: str
+) -> dict:
+    """
+    clear: 'all' | 'start' | 'end' — стереть соответствующие поля, остальное из picked.
+    """
+    out = {k: str(picked.get(k, "") or "").strip() for k in _date_keys}
+    if clear == "all":
+        return {k: "" for k in _date_keys}
+    if clear == "start":
+        out["fd"] = out["fm"] = out["fy"] = ""
+    elif clear == "end":
+        out["td"] = out["tm"] = out["ty"] = ""
+    return out
+
+
 def _period_parse_error_message(picked: dict, _date_keys: tuple) -> str:
     """Сообщение, если не удалось разобрать начало или конец периода."""
     d0 = _date_from_dmy_parts(picked.get("fd"), picked.get("fm"), picked.get("fy"))
@@ -217,6 +233,8 @@ if _bounds is None:
         "upload_totals",
         "period_to_clients",
         "_date_picker_last_nonce",
+        "_dsp_prefill",
+        "_date_picker_error",
     ):
         st.session_state.pop(_k, None)
 
@@ -241,7 +259,10 @@ st.caption("**Настройка периода**")
 st.subheader("Период анализа")
 _date_keys = ("fd", "fm", "fy", "td", "tm", "ty")
 _prefill = None
-if st.session_state.get("period_d_from") and st.session_state.get("period_d_to"):
+# После ошибки валидации — показываем очищенные/частичные поля, а не последний успешный период
+if "_dsp_prefill" in st.session_state:
+    _prefill = dict(st.session_state["_dsp_prefill"])
+elif st.session_state.get("period_d_from") and st.session_state.get("period_d_to"):
     _df0, _dt0 = st.session_state["period_d_from"], st.session_state["period_d_to"]
     _prefill = {
         "fd": str(_df0.day),
@@ -251,8 +272,6 @@ if st.session_state.get("period_d_from") and st.session_state.get("period_d_to")
         "tm": str(_dt0.month),
         "ty": str(_dt0.year),
     }
-elif st.session_state.get("_dsp_prefill"):
-    _prefill = dict(st.session_state["_dsp_prefill"])
 
 picked = render_date_segment_picker(
     key="date_segments",
@@ -268,9 +287,12 @@ if isinstance(picked, dict) and picked.get("_nonce") is not None:
         _cerr = picked.get("_clientValidationError")
         if _cerr:
             st.session_state["_date_picker_error"] = str(_cerr)
-            st.session_state["_dsp_prefill"] = {
-                k: str(picked.get(k, "") or "") for k in _date_keys
-            }
+            _clr = str(picked.get("_clearFields") or "all").lower()
+            if _clr not in ("all", "start", "end"):
+                _clr = "all"
+            st.session_state["_dsp_prefill"] = _prefill_after_date_error(
+                picked, _date_keys, _clr
+            )
         else:
             d0 = _date_from_dmy_parts(picked.get("fd"), picked.get("fm"), picked.get("fy"))
             d1 = _date_from_dmy_parts(picked.get("td"), picked.get("tm"), picked.get("ty"))
@@ -279,23 +301,29 @@ if isinstance(picked, dict) and picked.get("_nonce") is not None:
             st.session_state["_date_picker_error"] = _period_parse_error_message(
                 picked, _date_keys
             )
-            st.session_state["_dsp_prefill"] = {
-                k: str(picked.get(k, "") or "") for k in _date_keys
-            }
+            if d0 is None and d1 is None:
+                _clr = "all"
+            elif d0 is None:
+                _clr = "start"
+            else:
+                _clr = "end"
+            st.session_state["_dsp_prefill"] = _prefill_after_date_error(
+                picked, _date_keys, _clr
+            )
         elif not _cerr and d0 > d1:
             st.session_state["_date_picker_error"] = (
                 "Начало периода не может быть позже конца."
             )
-            st.session_state["_dsp_prefill"] = {
-                k: str(picked.get(k, "") or "") for k in _date_keys
-            }
+            st.session_state["_dsp_prefill"] = _prefill_after_date_error(
+                picked, _date_keys, "start"
+            )
         elif not _cerr:
             _vmsg = validate_user_period_for_scan(d0, d1, _bounds, _today)
             if _vmsg:
                 st.session_state["_date_picker_error"] = _vmsg
-                st.session_state["_dsp_prefill"] = {
-                    k: str(picked.get(k, "") or "") for k in _date_keys
-                }
+                st.session_state["_dsp_prefill"] = _prefill_after_date_error(
+                    picked, _date_keys, "all"
+                )
             else:
                 st.session_state.pop("_date_picker_error", None)
                 st.session_state["period_d_from"] = d0

@@ -127,7 +127,8 @@
       return { y: y, m: m, d: d, iso: toIso(y, m, d) };
     }
 
-    function reportValidationError(msg) {
+    /** clearFields: 'all' | 'start' | 'end' — что стереть в форме после ошибки */
+    function reportValidationError(msg, clearFields) {
       var fd = document.getElementById("fd").value.trim();
       var fm = document.getElementById("fm").value.trim();
       var fy = document.getElementById("fy").value.trim();
@@ -140,6 +141,7 @@
           fd: fd, fm: fm, fy: fy, td: td, tm: tm, ty: ty,
           _nonce: Date.now(),
           _clientValidationError: msg,
+          _clearFields: clearFields || "all",
         },
       });
     }
@@ -157,27 +159,37 @@
 
       if (!fd || !fm || !fy || !td || !tm || !ty) {
         reportValidationError(
-          "Заполните все поля (день, месяц, год для начала и конца периода)."
+          "Заполните все поля (день, месяц, год для начала и конца периода).",
+          "all"
         );
         return;
       }
       if (fy.length !== 4 || ty.length !== 4) {
-        reportValidationError("Год укажите четырьмя цифрами.");
+        reportValidationError("Год укажите четырьмя цифрами.", "all");
         return;
       }
 
       var a = parseDMY(fd, fm, fy);
       var b = parseDMY(td, tm, ty);
       if (!a) {
-        reportValidationError("Начало периода — такой даты в календаре не существует.");
+        reportValidationError(
+          "Начало периода — такой даты в календаре не существует. Поля начала очищены.",
+          "start"
+        );
         return;
       }
       if (!b) {
-        reportValidationError("Конец периода — такой даты в календаре не существует.");
+        reportValidationError(
+          "Конец периода — такой даты в календаре не существует. Поля конца очищены.",
+          "end"
+        );
         return;
       }
       if (a.iso > b.iso) {
-        reportValidationError("Начало периода не может быть позже конца.");
+        reportValidationError(
+          "Начало периода не может быть позже конца. Введите начало заново — поля начала очищены.",
+          "start"
+        );
         return;
       }
 
@@ -186,7 +198,8 @@
         reportValidationError(
           "Период должен быть внутри доступного диапазона base и не позже сегодняшней даты " +
           "(с " + boundsMeta.min.split("-").reverse().join(".") +
-          " по " + cap.split("-").reverse().join(".") + ")."
+          " по " + cap.split("-").reverse().join(".") + "). Все поля дат очищены.",
+          "all"
         );
         return;
       }
@@ -240,8 +253,10 @@
 
       ["fd", "fm", "fy", "td", "tm", "ty"].forEach(function (k) {
         var el = document.getElementById(k);
+        if (!el) return;
         var v = d[k];
-        if (el && v != null && String(v) !== "") el.value = String(v);
+        if (v != null && String(v).trim() !== "") el.value = String(v).trim();
+        else el.value = "";
       });
       signalReady();
       setTimeout(function () {
