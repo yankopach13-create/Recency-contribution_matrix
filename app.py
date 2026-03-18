@@ -6,12 +6,30 @@ Recency Contribution Matrix — Streamlit.
 
 import html
 import sys
+import types
 from datetime import date
 import calendar
 from pathlib import Path
 from typing import Optional
 
-sys.path.insert(0, str(Path(__file__).resolve().parent))
+_ROOT = Path(__file__).resolve().parent
+sys.path.insert(0, str(_ROOT))
+
+
+def _ensure_project_src_package() -> None:
+    """
+    Регистрирует локальный каталог src/ как пакет `src`.
+
+    На Streamlit Cloud и др. окружениях имя `src` иногда конфликтует с пакетом
+    из site-packages; без явного __path__ импорт src.base_period падает.
+    """
+    src_dir = str(_ROOT / "src")
+    pkg = types.ModuleType("src")
+    pkg.__path__ = [src_dir]  # type: ignore[attr-defined]
+    sys.modules["src"] = pkg
+
+
+_ensure_project_src_package()
 
 import pandas as pd
 import streamlit as st
@@ -41,7 +59,7 @@ from src.recency_contribution import (
     contribution_tables_from_prev_purchase,
 )
 
-BASE_DIR = Path(__file__).resolve().parent / "base"
+BASE_DIR = _ROOT / "base"
 
 
 def _date_from_dmy_parts(dd_s, mm_s, yyyy_s) -> Optional[date]:
