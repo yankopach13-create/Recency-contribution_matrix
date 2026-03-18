@@ -63,36 +63,40 @@ def _qp_get_one(qp, key: str):
 
 
 def _date_picker_autoadvance_html(fd, fm, fy, td, tm, ty) -> str:
-    """Один блок ввода: автопереход ДД→ММ→ГГГГ для начала и конца; Применить передаёт даты через URL."""
+    """
+    Автопереход между полями. «Применить» — отправка формы GET в target=_top с action=\"\":
+    для iframe со srcdoc пустой action ведёт на URL страницы Streamlit (обходит блокировку location.assign).
+    """
     return f"""
-<div style="font-family: system-ui, sans-serif; max-width: 520px;">
+<form id="dateForm" method="get" target="_top" action="" style="font-family: system-ui, sans-serif; max-width: 520px;">
+  <input type="hidden" name="apply_dates" value="1">
   <p style="margin:0 0 6px 0; font-weight:600;">Начало периода</p>
   <div style="display:flex; align-items:center; gap:6px; margin-bottom:14px;">
-    <input id="fd" type="text" inputmode="numeric" maxlength="2" placeholder="ДД" value="{html.escape(fd)}"
+    <input name="fd" id="fd" type="text" inputmode="numeric" maxlength="2" placeholder="ДД" value="{html.escape(fd)}"
       style="width:2.5rem; padding:8px; text-align:center; font-size:1rem; border:1px solid #ccc; border-radius:6px;">
     <span style="font-size:1.2rem;">.</span>
-    <input id="fm" type="text" inputmode="numeric" maxlength="2" placeholder="ММ" value="{html.escape(fm)}"
+    <input name="fm" id="fm" type="text" inputmode="numeric" maxlength="2" placeholder="ММ" value="{html.escape(fm)}"
       style="width:2.5rem; padding:8px; text-align:center; font-size:1rem; border:1px solid #ccc; border-radius:6px;">
     <span style="font-size:1.2rem;">.</span>
-    <input id="fy" type="text" inputmode="numeric" maxlength="4" placeholder="ГГГГ" value="{html.escape(fy)}"
+    <input name="fy" id="fy" type="text" inputmode="numeric" maxlength="4" placeholder="ГГГГ" value="{html.escape(fy)}"
       style="width:4rem; padding:8px; text-align:center; font-size:1rem; border:1px solid #ccc; border-radius:6px;">
   </div>
   <p style="margin:0 0 6px 0; font-weight:600;">Конец периода</p>
   <div style="display:flex; align-items:center; gap:6px; margin-bottom:16px;">
-    <input id="td" type="text" inputmode="numeric" maxlength="2" placeholder="ДД" value="{html.escape(td)}"
+    <input name="td" id="td" type="text" inputmode="numeric" maxlength="2" placeholder="ДД" value="{html.escape(td)}"
       style="width:2.5rem; padding:8px; text-align:center; font-size:1rem; border:1px solid #ccc; border-radius:6px;">
     <span style="font-size:1.2rem;">.</span>
-    <input id="tm" type="text" inputmode="numeric" maxlength="2" placeholder="ММ" value="{html.escape(tm)}"
+    <input name="tm" id="tm" type="text" inputmode="numeric" maxlength="2" placeholder="ММ" value="{html.escape(tm)}"
       style="width:2.5rem; padding:8px; text-align:center; font-size:1rem; border:1px solid #ccc; border-radius:6px;">
     <span style="font-size:1.2rem;">.</span>
-    <input id="ty" type="text" inputmode="numeric" maxlength="4" placeholder="ГГГГ" value="{html.escape(ty)}"
+    <input name="ty" id="ty" type="text" inputmode="numeric" maxlength="4" placeholder="ГГГГ" value="{html.escape(ty)}"
       style="width:4rem; padding:8px; text-align:center; font-size:1rem; border:1px solid #ccc; border-radius:6px;">
   </div>
-  <button type="button" id="applyDates" style="padding:10px 20px; font-size:1rem; cursor:pointer; background:#1f77b4; color:#fff; border:none; border-radius:8px;">
+  <button type="submit" style="padding:10px 20px; font-size:1rem; cursor:pointer; background:#1f77b4; color:#fff; border:none; border-radius:8px;">
     Применить даты
   </button>
-  <p style="margin:10px 0 0 0; font-size:0.85rem; color:#666;">Только цифры; после 2 цифр дня/месяца и 4 цифр года курсор переходит дальше. Tab / Shift+Tab — между полями.</p>
-</div>
+  <p style="margin:10px 0 0 0; font-size:0.85rem; color:#666;">Только цифры; после 2 цифр дня/месяца и 4 цифр года — переход дальше. Enter в последнем поле — применить.</p>
+</form>
 <script>
 (function() {{
   function digits(el, maxLen) {{
@@ -119,23 +123,38 @@ def _date_picker_autoadvance_html(fd, fm, fy, td, tm, ty) -> str:
   chain('td', 2, 'tm');
   chain('tm', 2, 'ty');
   chain('ty', 4, null);
+  var form = document.getElementById('dateForm');
   document.getElementById('ty').addEventListener('keydown', function(e) {{
-    if (e.key === 'Enter') document.getElementById('applyDates').click();
+    if (e.key === 'Enter') {{ e.preventDefault(); form.requestSubmit(); }}
   }});
-  document.getElementById('applyDates').onclick = function() {{
+  form.addEventListener('submit', function(e) {{
+    e.preventDefault();
     var fd = document.getElementById('fd').value.trim();
     var fm = document.getElementById('fm').value.trim();
     var fy = document.getElementById('fy').value.trim();
     var td = document.getElementById('td').value.trim();
     var tm = document.getElementById('tm').value.trim();
     var ty = document.getElementById('ty').value.trim();
-    var base = (window.top && window.top.location) ? window.top.location : window.location;
-    var u = new URL(base.href);
-    u.searchParams.set('apply_dates', '1');
-    u.searchParams.set('fd', fd); u.searchParams.set('fm', fm); u.searchParams.set('fy', fy);
-    u.searchParams.set('td', td); u.searchParams.set('tm', tm); u.searchParams.set('ty', ty);
-    try {{ window.top.location.assign(u.toString()); }} catch (e) {{ base.assign(u.toString()); }}
-  }};
+    function go(url) {{
+      try {{ window.top.location.href = url; return true; }} catch (e1) {{}}
+      try {{ window.parent.location.href = url; return true; }} catch (e2) {{}}
+      return false;
+    }}
+    try {{
+      var t = window.top.location;
+      var q = new URLSearchParams(t.search ? t.search.slice(1) : '');
+      ['apply_dates','fd','fm','fy','td','tm','ty'].forEach(function(k) {{ q.delete(k); }});
+      q.set('apply_dates', '1');
+      q.set('fd', fd); q.set('fm', fm); q.set('fy', fy);
+      q.set('td', td); q.set('tm', tm); q.set('ty', ty);
+      var qs = q.toString();
+      var url = t.origin + t.pathname + (qs ? '?' + qs : '');
+      if (go(url)) return;
+    }} catch (err) {{}}
+    form.action = '';
+    form.target = '_top';
+    form.submit();
+  }});
   setTimeout(function() {{ document.getElementById('fd').focus(); }}, 300);
 }})();
 </script>
