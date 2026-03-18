@@ -229,10 +229,6 @@ d_from = st.session_state.get("period_d_from")
 d_to = st.session_state.get("period_d_to")
 
 if "window_df" not in st.session_state or st.session_state["window_df"].empty:
-    st.info(
-        "Укажите даты и нажмите **Сканировать выбранный период** — "
-        "после загрузки данных появится отбор товаров и кнопка **Посчитать**."
-    )
     st.stop()
 
 df_cat = st.session_state["window_df"]
