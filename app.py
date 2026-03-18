@@ -6,6 +6,7 @@ Recency Contribution Matrix — Streamlit.
 
 import html
 import sys
+from datetime import date
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -35,14 +36,21 @@ from src.recency_contribution import (
 BASE_DIR = Path(__file__).resolve().parent / "base"
 
 
-def _parse_date_text(s: str):
-    """Парсинг даты: ДД.ММ.ГГГГ (и похожие форматы, dayfirst)."""
-    if s is None or not str(s).strip():
+def _date_from_dmy_parts(dd_s, mm_s, yyyy_s):
+    """Собирает date из полей день / месяц / год (только цифры, без точек)."""
+    for x in (dd_s, mm_s, yyyy_s):
+        if x is None or not str(x).strip():
+            return None
+    try:
+        d, m, y = int(str(dd_s).strip()), int(str(mm_s).strip()), int(str(yyyy_s).strip())
+    except ValueError:
         return None
-    ts = pd.to_datetime(str(s).strip(), dayfirst=True, errors="coerce")
-    if pd.isna(ts):
+    if not (1 <= d <= 31 and 1 <= m <= 12 and 1900 <= y <= 2100):
         return None
-    return ts.date()
+    try:
+        return date(y, m, d)
+    except ValueError:
+        return None
 
 
 def _fmt_num(x) -> str:
@@ -156,20 +164,35 @@ else:
         "(в имени Excel укажите год и месяц, например `2024 январь.xlsx`)."
     )
 
-st.caption("Формат дат: **ДД.ММ.ГГГГ** (например, 01.04.2024).")
-col_d1, col_d2 = st.columns(2)
-with col_d1:
-    t_from = st.text_input("Начало периода анализа", key="txt_d_from", placeholder="ДД.ММ.ГГГГ")
-with col_d2:
-    t_to = st.text_input("Конец периода анализа", key="txt_d_to", placeholder="ДД.ММ.ГГГГ")
+st.caption("Вводите **только цифры**; точки между днём, месяцем и годом уже на экране.")
 
-d_from = _parse_date_text(t_from)
-d_to = _parse_date_text(t_to)
+def _date_inputs_block(title: str, key_prefix: str):
+    st.markdown(f"**{title}**")
+    c1, dot_a, c2, dot_b, c3 = st.columns([1.15, 0.2, 1.15, 0.2, 1.8])
+    with c1:
+        dd = st.text_input("д", key=f"{key_prefix}_d", label_visibility="collapsed", placeholder="ДД", max_chars=2)
+    with dot_a:
+        st.markdown('<p style="margin-top:0.9rem;font-size:1.25rem;line-height:1;">.</p>', unsafe_allow_html=True)
+    with c2:
+        mm = st.text_input("м", key=f"{key_prefix}_m", label_visibility="collapsed", placeholder="ММ", max_chars=2)
+    with dot_b:
+        st.markdown('<p style="margin-top:0.9rem;font-size:1.25rem;line-height:1;">.</p>', unsafe_allow_html=True)
+    with c3:
+        yy = st.text_input("г", key=f"{key_prefix}_y", label_visibility="collapsed", placeholder="ГГГГ", max_chars=4)
+    return _date_from_dmy_parts(dd, mm, yy)
+
+
+col_a, col_b = st.columns(2)
+with col_a:
+    d_from = _date_inputs_block("Начало периода", "p_from")
+with col_b:
+    d_to = _date_inputs_block("Конец периода", "p_to")
+
 if d_from is None or d_to is None:
-    st.info("Укажите дату начала и дату конца периода.")
+    st.info("Заполните день, месяц и год для начала и конца периода (например **29** · **05** · **2025**).")
     st.stop()
 if d_from > d_to:
-    st.error("Начало периода не может быть позже конца. Проверьте ввод.")
+    st.error("Начало периода не может быть позже конца.")
     st.stop()
 
 if st.button("Сканировать выбранный период", type="secondary"):
