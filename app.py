@@ -204,6 +204,11 @@ st.markdown(
         color: #fff !important;
     }
     button[kind="primary"]:focus { box-shadow: 0 0 0 2px #fff, 0 0 0 4px #0d2847 !important; }
+    /* Внутренние отступы у рамок блоков */
+    [data-testid="stVerticalBlockBorderWrapper"] {
+        padding: 1.25rem 1.5rem !important;
+        border-radius: 10px !important;
+    }
     </style>
     """,
     unsafe_allow_html=True,
@@ -215,11 +220,21 @@ _bounds = available_date_bounds_from_base_filenames(BASE_DIR)
 _today = date.today()
 
 if _avail:
-    st.markdown(f"**Доступный период для анализа:** {_avail}")
+    _avail_esc = html.escape(_avail)
+    st.markdown(
+        f'<div style="font-size:1.9rem;line-height:1.4;margin:0.35rem 0 0.6rem 0;">'
+        f"<strong>Доступный период для анализа:</strong> "
+        f'<span style="color:#1e40af;font-weight:650;">{_avail_esc}</span></div>',
+        unsafe_allow_html=True,
+    )
 else:
     st.markdown(
-        "**Доступный период для анализа:** *не определён по именам файлов* "
-        "(в имени Excel укажите год и месяц, например `2024 январь.xlsx`)."
+        '<div style="font-size:1.9rem;line-height:1.4;margin:0.35rem 0 0.6rem 0;">'
+        "<strong>Доступный период для анализа:</strong> "
+        "<em>не определён по именам файлов</em> "
+        "(в имени Excel укажите год и месяц, например <code>2024 январь.xlsx</code>)."
+        "</div>",
+        unsafe_allow_html=True,
     )
 
 if _bounds is None:
@@ -256,119 +271,124 @@ else:
     }
 
 st.divider()
-_period_scan_warns_show = st.session_state.pop("_period_scan_warns", None)
-if _period_scan_warns_show:
-    for _w in _period_scan_warns_show:
-        st.caption(f"⚠ {_w}")
-st.subheader("Период анализа")
-_date_keys = ("fd", "fm", "fy", "td", "tm", "ty")
-_prefill = None
-# После ошибки валидации — показываем очищенные/частичные поля, а не последний успешный период
-if "_dsp_prefill" in st.session_state:
-    _prefill = dict(st.session_state["_dsp_prefill"])
-elif st.session_state.get("period_d_from") and st.session_state.get("period_d_to"):
-    _df0, _dt0 = st.session_state["period_d_from"], st.session_state["period_d_to"]
-    _prefill = {
-        "fd": str(_df0.day),
-        "fm": str(_df0.month),
-        "fy": str(_df0.year),
-        "td": str(_dt0.day),
-        "tm": str(_dt0.month),
-        "ty": str(_dt0.year),
-    }
+with st.container(border=True):
+    _period_scan_warns_show = st.session_state.pop("_period_scan_warns", None)
+    if _period_scan_warns_show:
+        for _w in _period_scan_warns_show:
+            st.caption(f"⚠ {_w}")
+    st.subheader("Период анализа")
+    _date_keys = ("fd", "fm", "fy", "td", "tm", "ty")
+    _prefill = None
+    # После ошибки валидации — показываем очищенные/частичные поля, а не последний успешный период
+    if "_dsp_prefill" in st.session_state:
+        _prefill = dict(st.session_state["_dsp_prefill"])
+    elif st.session_state.get("period_d_from") and st.session_state.get("period_d_to"):
+        _df0, _dt0 = st.session_state["period_d_from"], st.session_state["period_d_to"]
+        _prefill = {
+            "fd": str(_df0.day),
+            "fm": str(_df0.month),
+            "fy": str(_df0.year),
+            "td": str(_dt0.day),
+            "tm": str(_dt0.month),
+            "ty": str(_dt0.year),
+        }
 
-picked = render_date_segment_picker(
-    key="date_segments",
-    prefill=_prefill,
-    tab_index=0,
-    bounds=_picker_bounds,
-)
+    picked = render_date_segment_picker(
+        key="date_segments",
+        prefill=_prefill,
+        tab_index=0,
+        bounds=_picker_bounds,
+    )
 
-if isinstance(picked, dict) and picked.get("_nonce") is not None:
-    _nonce = picked["_nonce"]
-    if _nonce != st.session_state.get("_date_picker_last_nonce"):
-        st.session_state["_date_picker_last_nonce"] = _nonce
-        _cerr = picked.get("_clientValidationError")
-        if _cerr:
-            st.session_state["_date_picker_error"] = str(_cerr)
-            _clr = str(picked.get("_clearFields") or "all").lower()
-            if _clr not in ("all", "start", "end"):
-                _clr = "all"
-            st.session_state["_dsp_prefill"] = _prefill_after_date_error(
-                picked, _date_keys, _clr
-            )
-        else:
-            d0 = _date_from_dmy_parts(picked.get("fd"), picked.get("fm"), picked.get("fy"))
-            d1 = _date_from_dmy_parts(picked.get("td"), picked.get("tm"), picked.get("ty"))
-
-        if not _cerr and (d0 is None or d1 is None):
-            st.session_state["_date_picker_error"] = _period_parse_error_message(
-                picked, _date_keys
-            )
-            if d0 is None and d1 is None:
-                _clr = "all"
-            elif d0 is None:
-                _clr = "start"
-            else:
-                _clr = "end"
-            st.session_state["_dsp_prefill"] = _prefill_after_date_error(
-                picked, _date_keys, _clr
-            )
-        elif not _cerr and d0 > d1:
-            st.session_state["_date_picker_error"] = (
-                "Начало периода не может быть позже конца."
-            )
-            st.session_state["_dsp_prefill"] = _prefill_after_date_error(
-                picked, _date_keys, "start"
-            )
-        elif not _cerr:
-            _vmsg = validate_user_period_for_scan(d0, d1, _bounds, _today)
-            if _vmsg:
-                st.session_state["_date_picker_error"] = _vmsg
+    if isinstance(picked, dict) and picked.get("_nonce") is not None:
+        _nonce = picked["_nonce"]
+        if _nonce != st.session_state.get("_date_picker_last_nonce"):
+            st.session_state["_date_picker_last_nonce"] = _nonce
+            _cerr = picked.get("_clientValidationError")
+            if _cerr:
+                st.session_state["_date_picker_error"] = str(_cerr)
+                _clr = str(picked.get("_clearFields") or "all").lower()
+                if _clr not in ("all", "start", "end"):
+                    _clr = "all"
                 st.session_state["_dsp_prefill"] = _prefill_after_date_error(
-                    picked, _date_keys, "all"
+                    picked, _date_keys, _clr
                 )
             else:
-                st.session_state.pop("_date_picker_error", None)
-                st.session_state["period_d_from"] = d0
-                st.session_state["period_d_to"] = d1
-                st.session_state.pop("_dsp_prefill", None)
-                with st.spinner("Читаю файлы, пересекающиеся с выбранными датами…"):
-                    df_win, warns, _files_read = load_window_dataframe(BASE_DIR, d0, d1)
-                st.session_state.pop("contribution_tables", None)
-                st.session_state.pop("upload_totals", None)
-                st.session_state.pop("period_to_clients", None)
-                if df_win.empty:
-                    st.session_state.pop("window_df", None)
-                    st.session_state.pop("window_d_from", None)
-                    st.session_state.pop("window_d_to", None)
-                    st.warning(
-                        "Нет строк в выбранном периоде. Проверьте даты и формат файлов "
-                        "(нужны колонки: Группа1–3, Дата, Продажи, Количество чеков, "
-                        "Количество товар, Код клиента)."
+                d0 = _date_from_dmy_parts(picked.get("fd"), picked.get("fm"), picked.get("fy"))
+                d1 = _date_from_dmy_parts(picked.get("td"), picked.get("tm"), picked.get("ty"))
+
+            if not _cerr and (d0 is None or d1 is None):
+                st.session_state["_date_picker_error"] = _period_parse_error_message(
+                    picked, _date_keys
+                )
+                if d0 is None and d1 is None:
+                    _clr = "all"
+                elif d0 is None:
+                    _clr = "start"
+                else:
+                    _clr = "end"
+                st.session_state["_dsp_prefill"] = _prefill_after_date_error(
+                    picked, _date_keys, _clr
+                )
+            elif not _cerr and d0 > d1:
+                st.session_state["_date_picker_error"] = (
+                    "Начало периода не может быть позже конца."
+                )
+                st.session_state["_dsp_prefill"] = _prefill_after_date_error(
+                    picked, _date_keys, "start"
+                )
+            elif not _cerr:
+                _vmsg = validate_user_period_for_scan(d0, d1, _bounds, _today)
+                if _vmsg:
+                    st.session_state["_date_picker_error"] = _vmsg
+                    st.session_state["_dsp_prefill"] = _prefill_after_date_error(
+                        picked, _date_keys, "all"
                     )
                 else:
-                    st.session_state["window_df"] = df_win
-                    st.session_state["window_d_from"] = d0
-                    st.session_state["window_d_to"] = d1
-                if warns:
-                    st.session_state["_period_scan_warns"] = list(warns)
-                else:
-                    st.session_state.pop("_period_scan_warns", None)
-                st.rerun()
+                    st.session_state.pop("_date_picker_error", None)
+                    st.session_state["period_d_from"] = d0
+                    st.session_state["period_d_to"] = d1
+                    st.session_state.pop("_dsp_prefill", None)
+                    with st.spinner("Читаю файлы, пересекающиеся с выбранными датами…"):
+                        df_win, warns, _files_read = load_window_dataframe(BASE_DIR, d0, d1)
+                    st.session_state.pop("contribution_tables", None)
+                    st.session_state.pop("upload_totals", None)
+                    st.session_state.pop("period_to_clients", None)
+                    if df_win.empty:
+                        st.session_state.pop("window_df", None)
+                        st.session_state.pop("window_d_from", None)
+                        st.session_state.pop("window_d_to", None)
+                        st.warning(
+                            "Нет строк в выбранном периоде. Проверьте даты и формат файлов "
+                            "(нужны колонки: Группа1–3, Дата, Продажи, Количество чеков, "
+                            "Количество товар, Код клиента)."
+                        )
+                    else:
+                        st.session_state["window_df"] = df_win
+                        st.session_state["window_d_from"] = d0
+                        st.session_state["window_d_to"] = d1
+                    if warns:
+                        st.session_state["_period_scan_warns"] = list(warns)
+                    else:
+                        st.session_state.pop("_period_scan_warns", None)
+                    st.rerun()
 
-if st.session_state.get("_date_picker_error"):
-    st.error(st.session_state["_date_picker_error"], icon="⚠️")
+    if st.session_state.get("_date_picker_error"):
+        st.error(st.session_state["_date_picker_error"], icon="⚠️")
 
-d_from = st.session_state.get("period_d_from")
-d_to = st.session_state.get("period_d_to")
+    d_from = st.session_state.get("period_d_from")
+    d_to = st.session_state.get("period_d_to")
 
-if "window_df" not in st.session_state or st.session_state["window_df"].empty:
-    st.stop()
+    if "window_df" not in st.session_state or st.session_state["window_df"].empty:
+        st.stop()
 
-df_cat = st.session_state["window_df"]
+    df_cat = st.session_state["window_df"]
 
-with st.container(border=True):
+    st.markdown(
+        '<div style="height:1px;background:linear-gradient(90deg,transparent,#b8c5d6,transparent);'
+        'margin:1.1rem 0 0.85rem 0;"></div>',
+        unsafe_allow_html=True,
+    )
     st.subheader("Отбор товаров для анализа")
     opts_g1 = sorted_unique_non_empty(df_cat[COL_G1])
     col_a, col_b, col_c = st.columns(3)
