@@ -21,6 +21,7 @@ from src.base_period import (
     COL_G1,
     COL_G2,
     COL_G3,
+    available_period_from_base_filenames,
     filter_window_by_categories,
     list_sales_files,
     load_window_dataframe,
@@ -152,13 +153,14 @@ def _count_history_files(base_dir: Path, window_start: date) -> int:
 st.set_page_config(page_title="Recency Contribution", layout="wide")
 st.title("⏳ Матрица вклада в период по давности предыдущей покупки")
 
-st.markdown(
-    """
-**Как работает:** в окне анализа берутся продажи с выбранными **Группа1–3** (списки строятся только из файлов, пересекающихся с периодом).  
-Для каждого клиента период реценси = **месяц последней покупки до начала окна** (по всем категориям во всей папке `base/`).  
-Клиенты без покупок до начала окна попадают в **«Новые клиенты»**.
-"""
-)
+_avail = available_period_from_base_filenames(BASE_DIR)
+if _avail:
+    st.markdown(f"**Доступный период для анализа:** {_avail}")
+else:
+    st.markdown(
+        "**Доступный период для анализа:** *не определён по именам файлов* "
+        "(в имени Excel укажите год и месяц, например `2024 январь.xlsx`)."
+    )
 
 col_d1, col_d2 = st.columns(2)
 with col_d1:
@@ -170,50 +172,42 @@ if d_from > d_to:
     st.error("Начало периода не может быть позже конца.")
     st.stop()
 
-n_xlsx = len(list_sales_files(BASE_DIR))
-st.caption(f"В папке `base/`: **{n_xlsx}** Excel-файл(ов).")
-
-if st.button("Загрузить категории по периоду", type="secondary"):
+if st.button("Сканировать выбранный период", type="secondary"):
     with st.spinner("Читаю файлы, пересекающиеся с выбранными датами…"):
         df_win, warns, files_read = load_window_dataframe(BASE_DIR, d_from, d_to)
-    st.session_state["window_df"] = df_win
-    st.session_state["window_d_from"] = d_from
-    st.session_state["window_d_to"] = d_to
     st.session_state.pop("contribution_tables", None)
     st.session_state.pop("upload_totals", None)
     st.session_state.pop("period_to_clients", None)
     if df_win.empty:
+        st.session_state.pop("window_df", None)
+        st.session_state.pop("window_d_from", None)
+        st.session_state.pop("window_d_to", None)
         st.warning(
             "Нет строк в выбранном периоде. Проверьте даты и формат файлов "
             "(нужны колонки: Группа1–3, Дата, Продажи, Количество чеков, Количество товар, Код клиента)."
         )
     else:
-        st.success(
-            f"Загружено **{len(df_win):,}** строк из **{files_read}** файла(ов). "
-            "Выберите категории и нажмите **Посчитать**."
-        )
+        st.session_state["window_df"] = df_win
+        st.session_state["window_d_from"] = d_from
+        st.session_state["window_d_to"] = d_to
     for w in warns:
         st.caption(f"⚠ {w}")
 
-# Предупреждение, если даты изменились после загрузки окна
 if "window_df" in st.session_state:
     if (
         st.session_state.get("window_d_from") != d_from
         or st.session_state.get("window_d_to") != d_to
     ):
-        st.warning("Даты периода изменились — нажмите **Загрузить категории по периоду** снова.")
+        st.warning("Даты периода изменились — нажмите **Сканировать выбранный период** снова.")
 
 if "window_df" not in st.session_state or st.session_state["window_df"].empty:
-    st.info(
-        "1) Укажите даты периода анализа. 2) Нажмите **Загрузить категории по периоду**. "
-        "3) Выберите Группа1–3. 4) **Посчитать** (долго: сканируется вся история до начала периода)."
-    )
     st.stop()
 
 df_cat = st.session_state["window_df"]
 if st.session_state.get("window_d_from") != d_from or st.session_state.get("window_d_to") != d_to:
     st.stop()
 
+st.subheader("Категории")
 ALL = "(все)"
 
 opts_g1 = [ALL] + sorted_unique_non_empty(df_cat[COL_G1])

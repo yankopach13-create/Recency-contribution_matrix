@@ -27,6 +27,21 @@ SALES_REQUIRED = [COL_G1, COL_G2, COL_G3, COL_DATE, COL_SALES, COL_RECEIPTS, COL
 
 COL_ALIASES = {"Количество товара": COL_ITEMS}
 
+NUM_TO_RU_MONTH = {
+    1: "Январь",
+    2: "Февраль",
+    3: "Март",
+    4: "Апрель",
+    5: "Май",
+    6: "Июнь",
+    7: "Июль",
+    8: "Август",
+    9: "Сентябрь",
+    10: "Октябрь",
+    11: "Ноябрь",
+    12: "Декабрь",
+}
+
 RU_MONTH_TO_NUM = {
     "январь": 1,
     "февраль": 2,
@@ -137,6 +152,24 @@ def load_sales_excel_minimal(path: Path, cols: List[str]) -> Optional[pd.DataFra
     if missing:
         return None
     return df[cols].copy()
+
+
+def available_period_from_base_filenames(base_dir: Path) -> Optional[str]:
+    """
+    Диапазон по минимальному и максимальному (год, месяц) из имён файлов
+    вида «2024 январь». Если таких имён нет — None.
+    """
+    months: List[Tuple[int, int]] = []
+    for p in list_sales_files(base_dir):
+        ym = parse_year_month_from_filename(p.name)
+        if ym:
+            months.append(ym)
+    if not months:
+        return None
+    months.sort()
+    y1, m1 = months[0]
+    y2, m2 = months[-1]
+    return f"{NUM_TO_RU_MONTH[m1]} {y1} — {NUM_TO_RU_MONTH[m2]} {y2}"
 
 
 def list_sales_files(base_dir: Path) -> List[Path]:
