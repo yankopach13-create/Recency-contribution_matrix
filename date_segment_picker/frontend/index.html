@@ -35,7 +35,6 @@
       margin-top: 4px;
     }
     button:hover { filter: brightness(1.05); }
-    .hint { font-size: 0.8rem; color: #666; margin-top: 8px; max-width: 480px; }
   </style>
 </head>
 <body>
@@ -55,8 +54,7 @@
     <span class="dot">.</span>
     <input id="ty" class="y4" type="text" inputmode="numeric" maxlength="4" placeholder="ГГГГ" autocomplete="off" />
   </div>
-  <button type="button" id="applyBtn">Применить даты</button>
-  <p class="hint">Только цифры. После заполнения дня/месяца (2 цифры) и года (4 цифры) — переход к следующему полю. Enter — применить.</p>
+  <button type="button" id="applyBtn">Сканировать выбранный период</button>
 
   <script>
     function send(msg) {
@@ -69,7 +67,7 @@
         initialized = true;
         send({ type: "streamlit:componentReady", apiVersion: 1 });
       }
-      send({ type: "streamlit:setFrameHeight", height: 340 });
+      send({ type: "streamlit:setFrameHeight", height: 260 });
     }
 
     function digits(el, maxLen) {
@@ -108,6 +106,7 @@
           td: document.getElementById("td").value.trim(),
           tm: document.getElementById("tm").value.trim(),
           ty: document.getElementById("ty").value.trim(),
+          _nonce: Date.now(),
         },
       });
     }

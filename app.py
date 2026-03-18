@@ -165,93 +165,80 @@ else:
         "(в имени Excel укажите год и месяц, например `2024 январь.xlsx`)."
     )
 
-if "period_d_from" not in st.session_state or "period_d_to" not in st.session_state:
-    st.markdown(
-        "**Период анализа** — только цифры, **автопереход** между полями, затем **Применить даты**."
-    )
-    ver = st.session_state.get("_dsp_version", 0)
-    prefill = st.session_state.pop("_dsp_prefill", None)
-    picked = render_date_segment_picker(
-        key=f"date_segments_v{ver}",
-        prefill=prefill,
-        tab_index=0,
-    )
-    if isinstance(picked, dict) and picked:
+st.subheader("Период анализа")
+_date_keys = ("fd", "fm", "fy", "td", "tm", "ty")
+_prefill = None
+if st.session_state.get("period_d_from") and st.session_state.get("period_d_to"):
+    _df0, _dt0 = st.session_state["period_d_from"], st.session_state["period_d_to"]
+    _prefill = {
+        "fd": str(_df0.day),
+        "fm": str(_df0.month),
+        "fy": str(_df0.year),
+        "td": str(_dt0.day),
+        "tm": str(_dt0.month),
+        "ty": str(_dt0.year),
+    }
+elif st.session_state.get("_dsp_prefill"):
+    _prefill = dict(st.session_state["_dsp_prefill"])
+
+picked = render_date_segment_picker(key="date_segments", prefill=_prefill, tab_index=0)
+
+if isinstance(picked, dict) and picked.get("_nonce") is not None:
+    _nonce = picked["_nonce"]
+    if _nonce != st.session_state.get("_date_picker_last_nonce"):
+        st.session_state["_date_picker_last_nonce"] = _nonce
         d0 = _date_from_dmy_parts(picked.get("fd"), picked.get("fm"), picked.get("fy"))
         d1 = _date_from_dmy_parts(picked.get("td"), picked.get("tm"), picked.get("ty"))
         if d0 and d1 and d0 <= d1:
+            st.session_state.pop("_date_picker_error", None)
             st.session_state["period_d_from"] = d0
             st.session_state["period_d_to"] = d1
-            st.rerun()
-        st.error("Некорректные даты или начало периода позже конца.")
-        st.session_state["_dsp_prefill"] = {k: str(picked.get(k, "") or "") for k in ("fd", "fm", "fy", "td", "tm", "ty")}
-    st.stop()
-
-d_from = st.session_state["period_d_from"]
-d_to = st.session_state["period_d_to"]
-c1, c2 = st.columns([3, 1])
-with c1:
-    st.caption(f"**Текущий период:** {d_from.strftime('%d.%m.%Y')} — {d_to.strftime('%d.%m.%Y')}")
-with c2:
-    if st.button("Сменить даты", key="btn_change_dates"):
-        df0, dt0 = st.session_state.get("period_d_from"), st.session_state.get("period_d_to")
-        if df0 and dt0:
+            st.session_state.pop("_dsp_prefill", None)
+            with st.spinner("Читаю файлы, пересекающиеся с выбранными датами…"):
+                df_win, warns, _files_read = load_window_dataframe(BASE_DIR, d0, d1)
+            st.session_state.pop("contribution_tables", None)
+            st.session_state.pop("upload_totals", None)
+            st.session_state.pop("period_to_clients", None)
+            if df_win.empty:
+                st.session_state.pop("window_df", None)
+                st.session_state.pop("window_d_from", None)
+                st.session_state.pop("window_d_to", None)
+                st.warning(
+                    "Нет строк в выбранном периоде. Проверьте даты и формат файлов "
+                    "(нужны колонки: Группа1–3, Дата, Продажи, Количество чеков, "
+                    "Количество товар, Код клиента)."
+                )
+            else:
+                st.session_state["window_df"] = df_win
+                st.session_state["window_d_from"] = d0
+                st.session_state["window_d_to"] = d1
+            for w in warns:
+                st.caption(f"⚠ {w}")
+        else:
+            st.session_state["_date_picker_error"] = (
+                "Некорректные даты или начало периода позже конца."
+            )
             st.session_state["_dsp_prefill"] = {
-                "fd": str(df0.day),
-                "fm": str(df0.month),
-                "fy": str(df0.year),
-                "td": str(dt0.day),
-                "tm": str(dt0.month),
-                "ty": str(dt0.year),
+                k: str(picked.get(k, "") or "") for k in _date_keys
             }
-        st.session_state["_dsp_version"] = st.session_state.get("_dsp_version", 0) + 1
-        for k in (
-            "period_d_from",
-            "period_d_to",
-            "window_df",
-            "window_d_from",
-            "window_d_to",
-            "contribution_tables",
-            "upload_totals",
-            "period_to_clients",
-        ):
-            st.session_state.pop(k, None)
-        st.rerun()
 
-if st.button("Сканировать выбранный период", type="secondary"):
-    with st.spinner("Читаю файлы, пересекающиеся с выбранными датами…"):
-        df_win, warns, files_read = load_window_dataframe(BASE_DIR, d_from, d_to)
-    st.session_state.pop("contribution_tables", None)
-    st.session_state.pop("upload_totals", None)
-    st.session_state.pop("period_to_clients", None)
-    if df_win.empty:
-        st.session_state.pop("window_df", None)
-        st.session_state.pop("window_d_from", None)
-        st.session_state.pop("window_d_to", None)
-        st.warning(
-            "Нет строк в выбранном периоде. Проверьте даты и формат файлов "
-            "(нужны колонки: Группа1–3, Дата, Продажи, Количество чеков, Количество товар, Код клиента)."
-        )
-    else:
-        st.session_state["window_df"] = df_win
-        st.session_state["window_d_from"] = d_from
-        st.session_state["window_d_to"] = d_to
-    for w in warns:
-        st.caption(f"⚠ {w}")
+if st.session_state.get("_date_picker_error"):
+    st.error(st.session_state["_date_picker_error"])
 
-if "window_df" in st.session_state:
-    if (
-        st.session_state.get("window_d_from") != d_from
-        or st.session_state.get("window_d_to") != d_to
-    ):
-        st.warning("Даты периода изменились — нажмите **Сканировать выбранный период** снова.")
+d_from = st.session_state.get("period_d_from")
+d_to = st.session_state.get("period_d_to")
+
+if d_from and d_to:
+    st.caption(f"**Отсканированный период:** {d_from.strftime('%d.%m.%Y')} — {d_to.strftime('%d.%m.%Y')}")
 
 if "window_df" not in st.session_state or st.session_state["window_df"].empty:
+    st.info(
+        "Укажите даты и нажмите **Сканировать выбранный период** — "
+        "после загрузки данных появятся категории и кнопка **Посчитать**."
+    )
     st.stop()
 
 df_cat = st.session_state["window_df"]
-if st.session_state.get("window_d_from") != d_from or st.session_state.get("window_d_to") != d_to:
-    st.stop()
 
 st.subheader("Категории")
 ALL = "(все)"

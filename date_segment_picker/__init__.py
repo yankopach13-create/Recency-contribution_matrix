@@ -22,7 +22,7 @@ def render_date_segment_picker(
     tab_index: int = 0,
 ) -> Any:
     """
-    После «Применить даты» возвращает dict: fd, fm, fy, td, tm, ty.
+    После «Сканировать выбранный период» возвращает dict: fd, fm, fy, td, tm, ty, _nonce.
     prefill — подставить в поля при рендере (не путать с default виджета Streamlit).
     """
     return date_segment_picker(
