@@ -235,6 +235,7 @@ if _bounds is None:
         "_date_picker_last_nonce",
         "_dsp_prefill",
         "_date_picker_error",
+        "_period_scan_warns",
     ):
         st.session_state.pop(_k, None)
 
@@ -255,7 +256,10 @@ else:
     }
 
 st.divider()
-st.caption("**Настройка периода**")
+_period_scan_warns_show = st.session_state.pop("_period_scan_warns", None)
+if _period_scan_warns_show:
+    for _w in _period_scan_warns_show:
+        st.caption(f"⚠ {_w}")
 st.subheader("Период анализа")
 _date_keys = ("fd", "fm", "fy", "td", "tm", "ty")
 _prefill = None
@@ -347,8 +351,11 @@ if isinstance(picked, dict) and picked.get("_nonce") is not None:
                     st.session_state["window_df"] = df_win
                     st.session_state["window_d_from"] = d0
                     st.session_state["window_d_to"] = d1
-                for w in warns:
-                    st.caption(f"⚠ {w}")
+                if warns:
+                    st.session_state["_period_scan_warns"] = list(warns)
+                else:
+                    st.session_state.pop("_period_scan_warns", None)
+                st.rerun()
 
 if st.session_state.get("_date_picker_error"):
     st.error(st.session_state["_date_picker_error"], icon="⚠️")
@@ -361,8 +368,6 @@ if "window_df" not in st.session_state or st.session_state["window_df"].empty:
 
 df_cat = st.session_state["window_df"]
 
-st.divider()
-st.caption("**Настройка отбора товаров**")
 with st.container(border=True):
     st.subheader("Отбор товаров для анализа")
     opts_g1 = sorted_unique_non_empty(df_cat[COL_G1])
