@@ -613,10 +613,6 @@ with st.container(border=True):
 
     st.markdown("---")
     st.subheader("🛒 Анализ последней покупки")
-    st.caption(
-        "По выбранным сегментам реценси — что клиенты покупали в **последний календарный день** "
-        "покупки до начала периода анализа (топ‑10 по **Группа2**)."
-    )
     _seg_opts = sorted(
         k
         for k in period_to_clients
@@ -649,73 +645,37 @@ with st.container(border=True):
                 for k, v in _pm_raw.items()
             }
             _clients_prev = {c for c in _clients_u if c in _pm}
-            _n_union = len(_clients_prev)
-            if _n_union == 0:
+            _n_den = len(_clients_prev)
+            if _n_den == 0:
                 st.warning("У выбранных клиентов нет даты предыдущей покупки в данных.")
             else:
-                _clients_sorted = sorted(_clients_prev, key=lambda x: (len(x), x))
-                st.caption(
-                    "Опционально сузьте выборку: **пустой список** — все клиенты сегментов "
-                    f"({_n_union} чел.); иначе только отмеченные."
-                )
-                _lp_client_pick = st.multiselect(
-                    "Клиенты последней покупки",
-                    options=_clients_sorted,
-                    default=[],
-                    key="msel_last_purchase_clients",
-                    placeholder="Все клиенты выбранных сегментов",
-                )
-                _clients_use = (
-                    set(_lp_client_pick) if _lp_client_pick else set(_clients_prev)
-                )
-                _n_den = len(_clients_use)
-                if _n_den == 0:
-                    st.warning("Выберите хотя бы одного клиента или очистите фильтр клиентов.")
+                _sig = (tuple(sorted(_lp_sel)), _n_den, str(_d0))
+                if st.session_state.get("_lp_cache_sig") == _sig and isinstance(
+                    st.session_state.get("_lp_top_df"), pd.DataFrame
+                ):
+                    _top_lp = st.session_state["_lp_top_df"]
                 else:
-                    _sig = (
-                        tuple(sorted(_lp_sel)),
-                        tuple(sorted(_lp_client_pick))
-                        if _lp_client_pick
-                        else ("__all__",),
-                        _n_den,
-                        str(_d0),
+
+                    def _lp_cb(cur: int, total: int, name: str):
+                        pass
+
+                    with st.spinner("Сканирую base: строки за последний день покупки…"):
+                        _raw_lp = load_last_purchase_day_rows(
+                            BASE_DIR,
+                            _clients_prev,
+                            _pm,
+                            _d0,
+                            progress=_lp_cb,
+                        )
+                    _top_lp = top_g2_last_purchase_day(_raw_lp, _n_den, top_n=10)
+                    st.session_state["_lp_cache_sig"] = _sig
+                    st.session_state["_lp_top_df"] = _top_lp
+
+                if _top_lp.empty:
+                    st.warning("Нет строк за последний день покупки в base.")
+                else:
+                    st.dataframe(
+                        _top_lp,
+                        use_container_width=True,
+                        hide_index=True,
                     )
-                    if st.session_state.get("_lp_cache_sig") == _sig and isinstance(
-                        st.session_state.get("_lp_top_df"), pd.DataFrame
-                    ):
-                        _top_lp = st.session_state["_lp_top_df"]
-                    else:
-
-                        def _lp_cb(cur: int, total: int, name: str):
-                            pass
-
-                        with st.spinner(
-                            "Сканирую base: строки за последний день покупки…"
-                        ):
-                            _raw_lp = load_last_purchase_day_rows(
-                                BASE_DIR,
-                                _clients_use,
-                                _pm,
-                                _d0,
-                                progress=_lp_cb,
-                            )
-                        _top_lp = top_g2_last_purchase_day(_raw_lp, _n_den, top_n=10)
-                        st.session_state["_lp_cache_sig"] = _sig
-                        st.session_state["_lp_top_df"] = _top_lp
-
-                    st.caption(
-                        f"Уникальных клиентов в выборе (с историей до периода): **{_n_den}**. "
-                        f"**% клиентов** — доля от этого числа."
-                    )
-                    col_l, col_r = st.columns([1, 2])
-                    with col_l:
-                        st.metric("Клиентов в выборе", _n_den)
-                    with col_r:
-                        if _top_lp.empty:
-                            st.warning("Нет строк за последний день покупки в base.")
-                        else:
-                            st.dataframe(
-                                _top_lp,
-                                use_container_width=True,
-                                hide_index=True,
-                            )
