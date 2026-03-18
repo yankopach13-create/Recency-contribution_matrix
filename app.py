@@ -53,6 +53,95 @@ def _date_from_dmy_parts(dd_s, mm_s, yyyy_s):
         return None
 
 
+def _qp_get_one(qp, key: str):
+    v = qp.get(key)
+    if v is None:
+        return None
+    if isinstance(v, (list, tuple)):
+        return str(v[0]) if v else None
+    return str(v)
+
+
+def _date_picker_autoadvance_html(fd, fm, fy, td, tm, ty) -> str:
+    """Один блок ввода: автопереход ДД→ММ→ГГГГ для начала и конца; Применить передаёт даты через URL."""
+    return f"""
+<div style="font-family: system-ui, sans-serif; max-width: 520px;">
+  <p style="margin:0 0 6px 0; font-weight:600;">Начало периода</p>
+  <div style="display:flex; align-items:center; gap:6px; margin-bottom:14px;">
+    <input id="fd" type="text" inputmode="numeric" maxlength="2" placeholder="ДД" value="{html.escape(fd)}"
+      style="width:2.5rem; padding:8px; text-align:center; font-size:1rem; border:1px solid #ccc; border-radius:6px;">
+    <span style="font-size:1.2rem;">.</span>
+    <input id="fm" type="text" inputmode="numeric" maxlength="2" placeholder="ММ" value="{html.escape(fm)}"
+      style="width:2.5rem; padding:8px; text-align:center; font-size:1rem; border:1px solid #ccc; border-radius:6px;">
+    <span style="font-size:1.2rem;">.</span>
+    <input id="fy" type="text" inputmode="numeric" maxlength="4" placeholder="ГГГГ" value="{html.escape(fy)}"
+      style="width:4rem; padding:8px; text-align:center; font-size:1rem; border:1px solid #ccc; border-radius:6px;">
+  </div>
+  <p style="margin:0 0 6px 0; font-weight:600;">Конец периода</p>
+  <div style="display:flex; align-items:center; gap:6px; margin-bottom:16px;">
+    <input id="td" type="text" inputmode="numeric" maxlength="2" placeholder="ДД" value="{html.escape(td)}"
+      style="width:2.5rem; padding:8px; text-align:center; font-size:1rem; border:1px solid #ccc; border-radius:6px;">
+    <span style="font-size:1.2rem;">.</span>
+    <input id="tm" type="text" inputmode="numeric" maxlength="2" placeholder="ММ" value="{html.escape(tm)}"
+      style="width:2.5rem; padding:8px; text-align:center; font-size:1rem; border:1px solid #ccc; border-radius:6px;">
+    <span style="font-size:1.2rem;">.</span>
+    <input id="ty" type="text" inputmode="numeric" maxlength="4" placeholder="ГГГГ" value="{html.escape(ty)}"
+      style="width:4rem; padding:8px; text-align:center; font-size:1rem; border:1px solid #ccc; border-radius:6px;">
+  </div>
+  <button type="button" id="applyDates" style="padding:10px 20px; font-size:1rem; cursor:pointer; background:#1f77b4; color:#fff; border:none; border-radius:8px;">
+    Применить даты
+  </button>
+  <p style="margin:10px 0 0 0; font-size:0.85rem; color:#666;">Только цифры; после 2 цифр дня/месяца и 4 цифр года курсор переходит дальше. Tab / Shift+Tab — между полями.</p>
+</div>
+<script>
+(function() {{
+  function digits(el, maxLen) {{
+    el.value = el.value.replace(/\\D/g, '').slice(0, maxLen);
+  }}
+  var prevMap = {{ fm: 'fd', fy: 'fm', td: 'fy', tm: 'td', ty: 'tm' }};
+  function chain(id, maxLen, nextId) {{
+    var el = document.getElementById(id);
+    if (!el) return;
+    el.addEventListener('input', function() {{
+      digits(this, maxLen);
+      if (this.value.length >= maxLen && nextId) document.getElementById(nextId).focus();
+    }});
+    el.addEventListener('keydown', function(e) {{
+      if (e.key === 'Backspace' && this.value === '' && prevMap[id]) {{
+        var p = document.getElementById(prevMap[id]);
+        if (p) {{ p.focus(); p.value = p.value.slice(0, -1); }}
+      }}
+    }});
+  }}
+  chain('fd', 2, 'fm');
+  chain('fm', 2, 'fy');
+  chain('fy', 4, 'td');
+  chain('td', 2, 'tm');
+  chain('tm', 2, 'ty');
+  chain('ty', 4, null);
+  document.getElementById('ty').addEventListener('keydown', function(e) {{
+    if (e.key === 'Enter') document.getElementById('applyDates').click();
+  }});
+  document.getElementById('applyDates').onclick = function() {{
+    var fd = document.getElementById('fd').value.trim();
+    var fm = document.getElementById('fm').value.trim();
+    var fy = document.getElementById('fy').value.trim();
+    var td = document.getElementById('td').value.trim();
+    var tm = document.getElementById('tm').value.trim();
+    var ty = document.getElementById('ty').value.trim();
+    var base = (window.top && window.top.location) ? window.top.location : window.location;
+    var u = new URL(base.href);
+    u.searchParams.set('apply_dates', '1');
+    u.searchParams.set('fd', fd); u.searchParams.set('fm', fm); u.searchParams.set('fy', fy);
+    u.searchParams.set('td', td); u.searchParams.set('tm', tm); u.searchParams.set('ty', ty);
+    try {{ window.top.location.assign(u.toString()); }} catch (e) {{ base.assign(u.toString()); }}
+  }};
+  setTimeout(function() {{ document.getElementById('fd').focus(); }}, 300);
+}})();
+</script>
+"""
+
+
 def _fmt_num(x) -> str:
     if pd.isna(x):
         return ""
@@ -164,36 +253,85 @@ else:
         "(в имени Excel укажите год и месяц, например `2024 январь.xlsx`)."
     )
 
-st.caption("Вводите **только цифры**; точки между днём, месяцем и годом уже на экране.")
+qp = st.query_params
+_raw_apply = qp.get("apply_dates")
+_wants_apply = False
+if _raw_apply is not None:
+    if isinstance(_raw_apply, (list, tuple)):
+        _wants_apply = any(str(x).strip() == "1" for x in _raw_apply)
+    else:
+        _wants_apply = str(_raw_apply).strip() == "1"
 
-def _date_inputs_block(title: str, key_prefix: str):
-    st.markdown(f"**{title}**")
-    c1, dot_a, c2, dot_b, c3 = st.columns([1.15, 0.2, 1.15, 0.2, 1.8])
-    with c1:
-        dd = st.text_input("д", key=f"{key_prefix}_d", label_visibility="collapsed", placeholder="ДД", max_chars=2)
-    with dot_a:
-        st.markdown('<p style="margin-top:0.9rem;font-size:1.25rem;line-height:1;">.</p>', unsafe_allow_html=True)
-    with c2:
-        mm = st.text_input("м", key=f"{key_prefix}_m", label_visibility="collapsed", placeholder="ММ", max_chars=2)
-    with dot_b:
-        st.markdown('<p style="margin-top:0.9rem;font-size:1.25rem;line-height:1;">.</p>', unsafe_allow_html=True)
-    with c3:
-        yy = st.text_input("г", key=f"{key_prefix}_y", label_visibility="collapsed", placeholder="ГГГГ", max_chars=4)
-    return _date_from_dmy_parts(dd, mm, yy)
+if _wants_apply:
+    fd, fm, fy = _qp_get_one(qp, "fd"), _qp_get_one(qp, "fm"), _qp_get_one(qp, "fy")
+    td, tm, ty = _qp_get_one(qp, "td"), _qp_get_one(qp, "tm"), _qp_get_one(qp, "ty")
+    d_from_try = _date_from_dmy_parts(fd, fm, fy)
+    d_to_try = _date_from_dmy_parts(td, tm, ty)
+    st.query_params.clear()
+    if d_from_try and d_to_try and d_from_try <= d_to_try:
+        st.session_state["period_d_from"] = d_from_try
+        st.session_state["period_d_to"] = d_to_try
+        st.rerun()
+    else:
+        st.session_state.pop("period_d_from", None)
+        st.session_state.pop("period_d_to", None)
+        st.error("Проверьте даты: корректные день, месяц, год и чтобы начало не было позже конца.")
+        st.session_state["_date_prefill"] = {
+            "fd": fd or "", "fm": fm or "", "fy": fy or "",
+            "td": td or "", "tm": tm or "", "ty": ty or "",
+        }
 
-
-col_a, col_b = st.columns(2)
-with col_a:
-    d_from = _date_inputs_block("Начало периода", "p_from")
-with col_b:
-    d_to = _date_inputs_block("Конец периода", "p_to")
-
-if d_from is None or d_to is None:
-    st.info("Заполните день, месяц и год для начала и конца периода (например **29** · **05** · **2025**).")
+if "period_d_from" not in st.session_state or "period_d_to" not in st.session_state:
+    pre = st.session_state.pop("_date_prefill", None) or {}
+    fd, fm, fy = pre.get("fd", ""), pre.get("fm", ""), pre.get("fy", "")
+    td, tm, ty = pre.get("td", ""), pre.get("tm", ""), pre.get("ty", "")
+    st.markdown("**Период анализа** — ввод с **автопереходом** (после 2 цифр дня/месяца и 4 цифр года курсор сам переходит дальше).")
+    components.html(_date_picker_autoadvance_html(fd, fm, fy, td, tm, ty), height=340)
+    with st.expander("Если кнопка «Применить даты» не сработала (браузер/облако)"):
+        st.caption("Те же 6 полей — применение без перезагрузки страницы.")
+        c1, c2, c3, c4, c5, c6 = st.columns(6)
+        with c1:
+            bf = st.text_input("ДД н.", value=fd, key="fb_fd", max_chars=2, placeholder="ДД")
+        with c2:
+            bm = st.text_input("ММ н.", value=fm, key="fb_fm", max_chars=2, placeholder="ММ")
+        with c3:
+            by = st.text_input("ГГГГ н.", value=fy, key="fb_fy", max_chars=4, placeholder="ГГГГ")
+        with c4:
+            bt = st.text_input("ДД к.", value=td, key="fb_td", max_chars=2, placeholder="ДД")
+        with c5:
+            btm = st.text_input("ММ к.", value=tm, key="fb_tm", max_chars=2, placeholder="ММ")
+        with c6:
+            bty = st.text_input("ГГГГ к.", value=ty, key="fb_ty", max_chars=4, placeholder="ГГГГ")
+        if st.button("Применить (запасной вариант)", key="fb_apply"):
+            df_b = _date_from_dmy_parts(bf, bm, by)
+            dt_b = _date_from_dmy_parts(bt, btm, bty)
+            if df_b and dt_b and df_b <= dt_b:
+                st.session_state["period_d_from"] = df_b
+                st.session_state["period_d_to"] = dt_b
+                st.rerun()
+            else:
+                st.error("Некорректные даты.")
     st.stop()
-if d_from > d_to:
-    st.error("Начало периода не может быть позже конца.")
-    st.stop()
+
+d_from = st.session_state["period_d_from"]
+d_to = st.session_state["period_d_to"]
+c1, c2 = st.columns([3, 1])
+with c1:
+    st.caption(f"**Текущий период:** {d_from.strftime('%d.%m.%Y')} — {d_to.strftime('%d.%m.%Y')}")
+with c2:
+    if st.button("Сменить даты", key="btn_change_dates"):
+        for k in (
+            "period_d_from",
+            "period_d_to",
+            "window_df",
+            "window_d_from",
+            "window_d_to",
+            "contribution_tables",
+            "upload_totals",
+            "period_to_clients",
+        ):
+            st.session_state.pop(k, None)
+        st.rerun()
 
 if st.button("Сканировать выбранный период", type="secondary"):
     with st.spinner("Читаю файлы, пересекающиеся с выбранными датами…"):
