@@ -9,7 +9,7 @@ import re
 import calendar
 from datetime import date, datetime
 from pathlib import Path
-from typing import Callable, Dict, List, Optional, Set, Tuple
+from typing import Callable, Dict, List, Optional, Sequence, Set, Tuple, Union
 
 import pandas as pd
 
@@ -319,18 +319,30 @@ def scan_previous_purchase_dates(
 
 def filter_window_by_categories(
     df: pd.DataFrame,
-    g1: Optional[str],
-    g2: Optional[str],
-    g3: Optional[str],
+    g1: Optional[Union[str, Sequence[str]]] = None,
+    g2: Optional[Union[str, Sequence[str]]] = None,
+    g3: Optional[Union[str, Sequence[str]]] = None,
 ) -> pd.DataFrame:
-    """Фильтр по трём группам; None или пустая строка — без фильтра по полю."""
+    """
+    Фильтр по Группа1–3.
+    None / пустая строка / пустой список — без ограничения по этому уровню.
+    Строка — одно значение; непустой список — строки, где поле входит в список.
+    """
+
+    def _norm_list(val: Union[str, Sequence[str], None]) -> Optional[List[str]]:
+        if val is None:
+            return None
+        if isinstance(val, str):
+            s = val.strip()
+            return [s] if s else None
+        seq = [str(x).strip() for x in val if x is not None and str(x).strip()]
+        return seq if seq else None
+
     out = df
-    if g1 and str(g1).strip():
-        out = out[out[COL_G1] == str(g1).strip()]
-    if g2 and str(g2).strip():
-        out = out[out[COL_G2] == str(g2).strip()]
-    if g3 and str(g3).strip():
-        out = out[out[COL_G3] == str(g3).strip()]
+    for col, raw in ((COL_G1, g1), (COL_G2, g2), (COL_G3, g3)):
+        lst = _norm_list(raw)
+        if lst is not None:
+            out = out[out[col].isin(lst)]
     return out
 
 

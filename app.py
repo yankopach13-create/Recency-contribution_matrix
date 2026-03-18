@@ -228,33 +228,50 @@ if st.session_state.get("_date_picker_error"):
 d_from = st.session_state.get("period_d_from")
 d_to = st.session_state.get("period_d_to")
 
-if d_from and d_to:
-    st.caption(f"**Отсканированный период:** {d_from.strftime('%d.%m.%Y')} — {d_to.strftime('%d.%m.%Y')}")
-
 if "window_df" not in st.session_state or st.session_state["window_df"].empty:
     st.info(
         "Укажите даты и нажмите **Сканировать выбранный период** — "
-        "после загрузки данных появятся категории и кнопка **Посчитать**."
+        "после загрузки данных появится отбор товаров и кнопка **Посчитать**."
     )
     st.stop()
 
 df_cat = st.session_state["window_df"]
 
-st.subheader("Категории")
-ALL = "(все)"
+st.subheader("Отбор товаров для анализа")
+opts_g1 = sorted_unique_non_empty(df_cat[COL_G1])
+col_a, col_b, col_c = st.columns(3)
+with col_a:
+    sel1 = st.multiselect(
+        "Группа1",
+        options=opts_g1,
+        default=[],
+        key="msel_g1",
+        placeholder="Все",
+    )
+with col_b:
+    df_g1 = df_cat if not sel1 else df_cat[df_cat[COL_G1].isin(sel1)]
+    opts_g2 = sorted_unique_non_empty(df_g1[COL_G2])
+    sel2 = st.multiselect(
+        "Группа2",
+        options=opts_g2,
+        default=[],
+        key="msel_g2",
+        placeholder="Все",
+    )
+with col_c:
+    df_g2 = df_g1 if not sel2 else df_g1[df_g1[COL_G2].isin(sel2)]
+    opts_g3 = sorted_unique_non_empty(df_g2[COL_G3])
+    sel3 = st.multiselect(
+        "Группа3",
+        options=opts_g3,
+        default=[],
+        key="msel_g3",
+        placeholder="Все",
+    )
 
-opts_g1 = [ALL] + sorted_unique_non_empty(df_cat[COL_G1])
-sel1 = st.selectbox("Группа1", options=opts_g1, key="sel_g1")
-df_g1 = df_cat if sel1 == ALL else df_cat[df_cat[COL_G1] == sel1]
-opts_g2 = [ALL] + sorted_unique_non_empty(df_g1[COL_G2])
-sel2 = st.selectbox("Группа2", options=opts_g2, key="sel_g2")
-df_g2 = df_g1 if sel2 == ALL else df_g1[df_g1[COL_G2] == sel2]
-opts_g3 = [ALL] + sorted_unique_non_empty(df_g2[COL_G3])
-sel3 = st.selectbox("Группа3", options=opts_g3, key="sel_g3")
-
-g1_f = None if sel1 == ALL else sel1
-g2_f = None if sel2 == ALL else sel2
-g3_f = None if sel3 == ALL else sel3
+g1_f = sel1 if sel1 else None
+g2_f = sel2 if sel2 else None
+g3_f = sel3 if sel3 else None
 
 if st.button("Посчитать", type="primary"):
     df_work = filter_window_by_categories(df_cat, g1_f, g2_f, g3_f)
@@ -263,7 +280,7 @@ if st.button("Посчитать", type="primary"):
     ) & (pd.to_datetime(df_work["Дата"], errors="coerce").dt.date <= d_to)
     df_work = df_work.loc[mask_win].copy()
     if df_work.empty:
-        st.warning("После фильтра по датам и категориям нет строк. Измените период или категории.")
+        st.warning("После фильтра по датам и отбору товаров нет строк. Измените период или отбор.")
         st.stop()
     df_work["_client_norm"] = df_work[COL_CLIENT].map(normalize_client_code)
     clients_set = set(df_work["_client_norm"].dropna().astype(str))
@@ -299,6 +316,12 @@ if "contribution_tables" not in st.session_state:
 tables = st.session_state["contribution_tables"]
 upload_totals = st.session_state["upload_totals"]
 period_to_clients = st.session_state["period_to_clients"]
+_d0 = st.session_state.get("period_d_from")
+_d1 = st.session_state.get("period_d_to")
+if _d0 and _d1:
+    st.markdown(
+        f"**Анализируемый период:** {_d0.strftime('%d.%m.%Y')} — {_d1.strftime('%d.%m.%Y')}"
+    )
 
 tab_names = ["Вклад в выручку", "Вклад в чеки", "Вклад в товар", "Вклад клиентов"]
 metric_keys = ["Продажи", "Чеки", "Товар в шт.", "Клиенты"]
