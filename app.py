@@ -174,6 +174,24 @@ def _copy_codes_block_html(text_to_copy: str, block_id: str) -> str:
 
 
 st.set_page_config(page_title="Recency Contribution", layout="wide")
+st.markdown(
+    """
+    <style>
+    button[kind="primary"] {
+        background-color: #0d2847 !important;
+        border: 1px solid #0d2847 !important;
+        color: #fff !important;
+    }
+    button[kind="primary"]:hover {
+        background-color: #164a7d !important;
+        border-color: #164a7d !important;
+        color: #fff !important;
+    }
+    button[kind="primary"]:focus { box-shadow: 0 0 0 2px #fff, 0 0 0 4px #0d2847 !important; }
+    </style>
+    """,
+    unsafe_allow_html=True,
+)
 st.title("⏳ Матрица вклада в период по давности предыдущей покупки")
 
 _avail = available_period_from_base_filenames(BASE_DIR)
@@ -218,6 +236,8 @@ else:
         ),
     }
 
+st.divider()
+st.caption("**Настройка периода**")
 st.subheader("Период анализа")
 _date_keys = ("fd", "fm", "fy", "td", "tm", "ty")
 _prefill = None
@@ -313,170 +333,189 @@ if "window_df" not in st.session_state or st.session_state["window_df"].empty:
 
 df_cat = st.session_state["window_df"]
 
-st.subheader("Отбор товаров для анализа")
-opts_g1 = sorted_unique_non_empty(df_cat[COL_G1])
-col_a, col_b, col_c = st.columns(3)
-with col_a:
-    sel1 = st.multiselect(
-        "Группа1",
-        options=opts_g1,
-        default=[],
-        key="msel_g1",
-        placeholder="Все",
-    )
-with col_b:
-    df_g1 = df_cat if not sel1 else df_cat[df_cat[COL_G1].isin(sel1)]
-    opts_g2 = sorted_unique_non_empty(df_g1[COL_G2])
-    sel2 = st.multiselect(
-        "Группа2",
-        options=opts_g2,
-        default=[],
-        key="msel_g2",
-        placeholder="Все",
-    )
-with col_c:
-    df_g2 = df_g1 if not sel2 else df_g1[df_g1[COL_G2].isin(sel2)]
-    opts_g3 = sorted_unique_non_empty(df_g2[COL_G3])
-    sel3 = st.multiselect(
-        "Группа3",
-        options=opts_g3,
-        default=[],
-        key="msel_g3",
-        placeholder="Все",
-    )
+st.divider()
+st.caption("**Настройка отбора товаров**")
+with st.container(border=True):
+    st.subheader("Отбор товаров для анализа")
+    opts_g1 = sorted_unique_non_empty(df_cat[COL_G1])
+    col_a, col_b, col_c = st.columns(3)
+    with col_a:
+        sel1 = st.multiselect(
+            "Группа1",
+            options=opts_g1,
+            default=[],
+            key="msel_g1",
+            placeholder="Все",
+        )
+    with col_b:
+        df_g1 = df_cat if not sel1 else df_cat[df_cat[COL_G1].isin(sel1)]
+        opts_g2 = sorted_unique_non_empty(df_g1[COL_G2])
+        sel2 = st.multiselect(
+            "Группа2",
+            options=opts_g2,
+            default=[],
+            key="msel_g2",
+            placeholder="Все",
+        )
+    with col_c:
+        df_g2 = df_g1 if not sel2 else df_g1[df_g1[COL_G2].isin(sel2)]
+        opts_g3 = sorted_unique_non_empty(df_g2[COL_G3])
+        sel3 = st.multiselect(
+            "Группа3",
+            options=opts_g3,
+            default=[],
+            key="msel_g3",
+            placeholder="Все",
+        )
 
-g1_f = sel1 if sel1 else None
-g2_f = sel2 if sel2 else None
-g3_f = sel3 if sel3 else None
+    g1_f = sel1 if sel1 else None
+    g2_f = sel2 if sel2 else None
+    g3_f = sel3 if sel3 else None
 
-if st.button("Посчитать", type="primary"):
-    df_work = filter_window_by_categories(df_cat, g1_f, g2_f, g3_f)
-    mask_win = (
-        pd.to_datetime(df_work["Дата"], errors="coerce").dt.date >= d_from
-    ) & (pd.to_datetime(df_work["Дата"], errors="coerce").dt.date <= d_to)
-    df_work = df_work.loc[mask_win].copy()
-    if df_work.empty:
-        st.warning("После фильтра по датам и отбору товаров нет строк. Измените период или отбор.")
-        st.stop()
-    df_work["_client_norm"] = df_work[COL_CLIENT].map(normalize_client_code)
-    clients_set = set(df_work["_client_norm"].dropna().astype(str))
+    if st.button(
+        "Применить все фильтры для анализа", type="primary", key="btn_apply_filters"
+    ):
+        df_work = filter_window_by_categories(df_cat, g1_f, g2_f, g3_f)
+        mask_win = (
+            pd.to_datetime(df_work["Дата"], errors="coerce").dt.date >= d_from
+        ) & (pd.to_datetime(df_work["Дата"], errors="coerce").dt.date <= d_to)
+        df_work = df_work.loc[mask_win].copy()
+        if df_work.empty:
+            st.warning(
+                "После фильтра по датам и отбору товаров нет строк. "
+                "Измените период или отбор."
+            )
+            st.stop()
+        df_work["_client_norm"] = df_work[COL_CLIENT].map(normalize_client_code)
+        clients_set = set(df_work["_client_norm"].dropna().astype(str))
 
-    progress = st.progress(0)
-    status = st.empty()
+        progress = st.progress(0)
+        status = st.empty()
 
-    def _cb(cur: int, total: int, name: str):
-        progress.progress(cur / max(total, 1))
-        status.caption(f"Скан истории: файл **{cur}/{total}** — `{name}`")
+        def _cb(cur: int, total: int, name: str):
+            progress.progress(cur / max(total, 1))
+            status.caption(f"Скан истории: файл **{cur}/{total}** — `{name}`")
 
-    with st.spinner("Ищу предыдущие покупки по всей base…"):
-        prev_map = scan_previous_purchase_dates(BASE_DIR, clients_set, d_from, progress=_cb)
-    progress.empty()
-    status.empty()
+        with st.spinner("Ищу предыдущие покупки по всей base…"):
+            prev_map = scan_previous_purchase_dates(
+                BASE_DIR, clients_set, d_from, progress=_cb
+            )
+        progress.empty()
+        status.empty()
 
-    tables, period_to_clients = contribution_tables_from_prev_purchase(
-        df_work, prev_map, analysis_start=d_from
-    )
-    upload_totals = {
-        "Продажи": float(df_work["Продажи"].sum()),
-        "Чеки": float(df_work["Количество чеков"].sum()),
-        "Товар в шт.": float(df_work["Количество товар"].sum()),
-        "Клиенты": int(df_work[COL_CLIENT].nunique()),
-    }
-    st.session_state["contribution_tables"] = tables
-    st.session_state["upload_totals"] = upload_totals
-    st.session_state["period_to_clients"] = period_to_clients
+        tables, period_to_clients = contribution_tables_from_prev_purchase(
+            df_work, prev_map, analysis_start=d_from
+        )
+        upload_totals = {
+            "Продажи": float(df_work["Продажи"].sum()),
+            "Чеки": float(df_work["Количество чеков"].sum()),
+            "Товар в шт.": float(df_work["Количество товар"].sum()),
+            "Клиенты": int(df_work[COL_CLIENT].nunique()),
+        }
+        st.session_state["contribution_tables"] = tables
+        st.session_state["upload_totals"] = upload_totals
+        st.session_state["period_to_clients"] = period_to_clients
 
 if "contribution_tables" not in st.session_state:
     st.stop()
+
+st.divider()
+st.subheader("Результаты анализа")
 
 tables = st.session_state["contribution_tables"]
 upload_totals = st.session_state["upload_totals"]
 period_to_clients = st.session_state["period_to_clients"]
 _d0 = st.session_state.get("period_d_from")
 _d1 = st.session_state.get("period_d_to")
-if _d0 and _d1:
-    st.markdown(
-        f"**Анализируемый период:** {_d0.strftime('%d.%m.%Y')} — {_d1.strftime('%d.%m.%Y')}"
-    )
 
-tab_names = ["Вклад в выручку", "Вклад в чеки", "Вклад в товар", "Вклад клиентов"]
-metric_keys = ["Продажи", "Чеки", "Товар в шт.", "Клиенты"]
-tabs = st.tabs(tab_names)
-for tab, metric_key in zip(tabs, metric_keys):
-    df_metric = tables.get(metric_key)
-    if df_metric is None or df_metric.empty:
+with st.container(border=True):
+    if _d0 and _d1:
+        st.markdown(
+            f"**Анализируемый период:** {_d0.strftime('%d.%m.%Y')} — {_d1.strftime('%d.%m.%Y')}"
+        )
+
+    tab_names = ["Вклад в выручку", "Вклад в чеки", "Вклад в товар", "Вклад клиентов"]
+    metric_keys = ["Продажи", "Чеки", "Товар в шт.", "Клиенты"]
+    tabs = st.tabs(tab_names)
+    for _tab_idx, (tab, metric_key) in enumerate(zip(tabs, metric_keys)):
+        df_metric = tables.get(metric_key)
+        if df_metric is None or df_metric.empty:
+            with tab:
+                st.info("Нет данных по этой метрике.")
+            continue
         with tab:
-            st.info("Нет данных по этой метрике.")
-        continue
-    with tab:
-        col_table, col_chart = st.columns([1, 1.4])
-        with col_table:
-            total_value = df_metric["value"].sum()
-            total_fmt = _fmt_num(total_value)
-            data_df = df_metric.copy()
-            data_df["pct"] = data_df["pct"].apply(lambda x: f"{x} %")
-            data_df["value_fmt"] = data_df["value"].apply(_fmt_num)
-            data_rows = [
-                (str(row["month_label"]), row["value_fmt"], row["pct"])
-                for _, row in data_df.iterrows()
-            ]
-            st.markdown(_table_html(data_rows, total_fmt), unsafe_allow_html=True)
-        with col_chart:
-            fig = go.Figure(
-                data=[
-                    go.Pie(
-                        labels=df_metric["month_label"],
-                        values=df_metric["value"],
-                        hole=0.6,
-                        textinfo="label+percent",
-                        textposition="inside",
-                        insidetextorientation="radial",
-                        showlegend=False,
-                        textfont=dict(size=12),
-                        automargin=True,
-                    )
+            col_table, col_chart = st.columns([1, 1.4])
+            with col_table:
+                total_value = df_metric["value"].sum()
+                total_fmt = _fmt_num(total_value)
+                data_df = df_metric.copy()
+                data_df["pct"] = data_df["pct"].apply(lambda x: f"{x} %")
+                data_df["value_fmt"] = data_df["value"].apply(_fmt_num)
+                data_rows = [
+                    (str(row["month_label"]), row["value_fmt"], row["pct"])
+                    for _, row in data_df.iterrows()
                 ]
-            )
-            total_str = _fmt_num(upload_totals[metric_key])
-            fig.add_annotation(
-                text=total_str,
-                x=0.5,
-                y=0.5,
-                showarrow=False,
-                font=dict(size=24, color="gray"),
-            )
-            fig.update_layout(
-                height=500,
-                margin=dict(t=20, b=20, l=20, r=20),
-                uniformtext=dict(minsize=10, mode="hide"),
-            )
-            st.plotly_chart(fig, use_container_width=True)
-        st.markdown("---")
-        st.subheader("👥 Коды клиентов")
-        month_options = [
-            str(m) for m in df_metric["month_label"] if str(m) != LABEL_NO_BONUS_CARD
-        ]
-        if month_options:
-            st.caption("Выберите группу (период реценси) для копирования кодов")
-            col_sel, _ = st.columns([1, 3])
-            with col_sel:
-                sel_key = f"month_sel_{metric_key.replace(' ', '_').replace('.', '_')}"
-                selected_month = st.selectbox(
-                    "Период",
-                    options=month_options,
-                    key=sel_key,
-                    label_visibility="collapsed",
+                st.markdown(_table_html(data_rows, total_fmt), unsafe_allow_html=True)
+            with col_chart:
+                fig = go.Figure(
+                    data=[
+                        go.Pie(
+                            labels=df_metric["month_label"],
+                            values=df_metric["value"],
+                            hole=0.6,
+                            textinfo="label+percent",
+                            textposition="inside",
+                            insidetextorientation="radial",
+                            showlegend=False,
+                            textfont=dict(size=12),
+                            automargin=True,
+                        )
+                    ]
                 )
-                codes = period_to_clients.get(selected_month, [])
+                total_str = _fmt_num(upload_totals[metric_key])
+                fig.add_annotation(
+                    text=total_str,
+                    x=0.5,
+                    y=0.5,
+                    showarrow=False,
+                    font=dict(size=24, color="gray"),
+                )
+                fig.update_layout(
+                    height=500,
+                    margin=dict(t=20, b=20, l=20, r=20),
+                    uniformtext=dict(minsize=10, mode="hide"),
+                )
+                st.plotly_chart(
+                    fig, use_container_width=True, key=f"plotly_pie_{_tab_idx}"
+                )
+            st.markdown("---")
+            st.subheader("👥 Коды клиентов")
+            month_options = [
+                str(m) for m in df_metric["month_label"] if str(m) != LABEL_NO_BONUS_CARD
+            ]
+            if month_options:
+                st.caption("Выберите группу (период реценси) для копирования кодов")
+                col_sel, _ = st.columns([1, 3])
+                with col_sel:
+                    sel_key = f"month_sel_{metric_key.replace(' ', '_').replace('.', '_')}"
+                    selected_month = st.selectbox(
+                        "Период",
+                        options=month_options,
+                        key=sel_key,
+                        label_visibility="collapsed",
+                    )
+                    codes = period_to_clients.get(selected_month, [])
 
-                def _fmt_code(c):
-                    try:
-                        f = float(c)
-                        return str(int(f)) if f == int(f) else str(c)
-                    except (ValueError, TypeError):
-                        return str(c)
+                    def _fmt_code(c):
+                        try:
+                            f = float(c)
+                            return str(int(f)) if f == int(f) else str(c)
+                        except (ValueError, TypeError):
+                            return str(c)
 
-                text_to_copy = "\n".join(_fmt_code(c) for c in codes)
-                components.html(_copy_codes_block_html(text_to_copy, sel_key), height=52)
-        else:
-            st.caption("Нет периодов для выбора кодов (кроме «Клиенты без БК»).")
+                    text_to_copy = "\n".join(_fmt_code(c) for c in codes)
+                    components.html(
+                        _copy_codes_block_html(text_to_copy, sel_key), height=52
+                    )
+            else:
+                st.caption("Нет периодов для выбора кодов (кроме «Клиенты без БК»).")

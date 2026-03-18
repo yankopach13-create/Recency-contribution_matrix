@@ -23,7 +23,7 @@ def render_date_segment_picker(
     bounds: Optional[Dict[str, Any]] = None,
 ) -> Any:
     """
-    После «Сканировать выбранный период» возвращает dict: fd, fm, fy, td, tm, ty, _nonce.
+    После «Отобрать период для анализа» возвращает dict: fd, fm, fy, td, tm, ty, _nonce.
     bounds: ok, min/max/today (ISO) при ok=True; иначе ok=False, reason.
     """
     return date_segment_picker(

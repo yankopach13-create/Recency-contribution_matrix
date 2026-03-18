@@ -28,13 +28,13 @@
       padding: 10px 20px;
       font-size: 1rem;
       cursor: pointer;
-      background: #ff4b4b;
+      background: #0d2847;
       color: #fff;
       border: none;
       border-radius: 8px;
       margin-top: 4px;
     }
-    button:hover:not(:disabled) { filter: brightness(1.05); }
+    button:hover:not(:disabled) { background: #164a7d; filter: none; }
     button:disabled {
       background: #ccc;
       color: #666;
@@ -60,7 +60,7 @@
     <span class="dot">.</span>
     <input id="ty" class="y4" type="text" inputmode="numeric" maxlength="4" placeholder="ГГГГ" autocomplete="off" />
   </div>
-  <button type="button" id="applyBtn">Сканировать выбранный период</button>
+  <button type="button" id="applyBtn">Отобрать период для анализа</button>
   <div id="blockedMsg" class="blocked" style="display:none;"></div>
 
   <script>
