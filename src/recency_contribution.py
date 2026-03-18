@@ -4,6 +4,7 @@
 Режим «base + загрузка»: метрика — выручка или штуки из загружаемого файла.
 """
 
+from datetime import date
 from pathlib import Path
 from typing import Dict, List, Literal, Optional, Tuple, Union
 
@@ -269,17 +270,31 @@ def contribution_tables_from_upload(
     return (tables, period_to_clients)
 
 
-def prev_purchase_ts_to_period_label(ts: pd.Timestamp) -> str:
+def _one_year_before_analysis(d_from: date) -> date:
+    """Та же календарная дата год назад (для границы «ровно год до начала анализа»)."""
+    try:
+        return date(d_from.year - 1, d_from.month, d_from.day)
+    except ValueError:
+        return date(d_from.year - 1, 2, 28)
+
+
+def prev_purchase_ts_to_period_label(ts: pd.Timestamp, analysis_start: date) -> str:
     """
-    Подпись периода реценси по дате предыдущей покупки (как period_label в режиме загрузки).
-    2024 — кварталы; остальные годы — месяц + год.
+    Подпись периода реценси относительно начала анализа (analysis_start = первый день окна):
+    предыдущая покупка строго раньше analysis_start.
+    — Раньше чем за календарный год до analysis_start → квартал (C1 … C4 ГГГГ).
+    — От годовщины (включительно) до начала анализа → месяц (Январь ГГГГ …).
     """
     if pd.isna(ts):
         return ""
-    year = int(ts.year)
-    month = int(ts.month)
+    prev_d = pd.Timestamp(ts).date()
+    if prev_d >= analysis_start:
+        return ""
+    cutoff = _one_year_before_analysis(analysis_start)
+    year = int(prev_d.year)
+    month = int(prev_d.month)
     month_label = MONTH_NAMES[month] + " " + str(year)
-    if year == 2024:
+    if prev_d < cutoff:
         quarter = (month - 1) // 3 + 1
         return f"C{quarter} {year}"
     return month_label
@@ -288,13 +303,13 @@ def prev_purchase_ts_to_period_label(ts: pd.Timestamp) -> str:
 def contribution_tables_from_prev_purchase(
     df_window: pd.DataFrame,
     prev_purchase_by_client: Dict,
+    analysis_start: date,
     client_norm_col: str = "_client_norm",
 ) -> Tuple[Dict[str, pd.DataFrame], Dict[str, List[str]]]:
     """
     Вклад по метрикам окна анализа, сгруппированный по периоду *предыдущей* покупки
-    (до начала окна). Ключи prev_purchase_by_client — нормализованные коды клиентов.
-    Ожидаемые колонки df_window: Продажи, Количество чеков, Количество товар, Код клиента
-    и client_norm_col (нормализованный код).
+    (до начала окна). analysis_start — первый день периода анализа (граница «год назад»).
+    Ключи prev_purchase_by_client — нормализованные коды клиентов.
     """
     empty_df = pd.DataFrame(columns=["month_label", "value", "pct"])
     empty_tables = {
@@ -320,7 +335,7 @@ def contribution_tables_from_prev_purchase(
         ts = prev_purchase_by_client.get(str(cc_norm))
         if ts is None or (isinstance(ts, float) and pd.isna(ts)):
             return None
-        return prev_purchase_ts_to_period_label(pd.Timestamp(ts))
+        return prev_purchase_ts_to_period_label(pd.Timestamp(ts), analysis_start)
 
     work_with_code["period_label"] = work_with_code[client_norm_col].map(_period_for_row)
     merged_in_base = work_with_code[work_with_code["period_label"].notna()].copy()

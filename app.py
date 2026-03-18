@@ -23,10 +23,8 @@ from src.base_period import (
     COL_G3,
     available_period_from_base_filenames,
     filter_window_by_categories,
-    list_sales_files,
     load_window_dataframe,
     normalize_client_code,
-    parse_year_month_from_filename,
     scan_previous_purchase_dates,
     sorted_unique_non_empty,
 )
@@ -137,19 +135,6 @@ def _copy_codes_block_html(text_to_copy: str, block_id: str) -> str:
 """
 
 
-def _count_history_files(base_dir: Path, window_start: date) -> int:
-    """Число файлов, которые будут прочитаны при скане истории (оценка)."""
-    y0, m0 = window_start.year, window_start.month
-    n = 0
-    for p in list_sales_files(base_dir):
-        ym = parse_year_month_from_filename(p.name)
-        if ym is None:
-            n += 1
-        elif (ym[0], ym[1]) <= (y0, m0):
-            n += 1
-    return n
-
-
 st.set_page_config(page_title="Recency Contribution", layout="wide")
 st.title("⏳ Матрица вклада в период по давности предыдущей покупки")
 
@@ -223,13 +208,6 @@ g1_f = None if sel1 == ALL else sel1
 g2_f = None if sel2 == ALL else sel2
 g3_f = None if sel3 == ALL else sel3
 
-hist_n = _count_history_files(BASE_DIR, d_from)
-st.warning(
-    f"**Посчитать** выполнит полный проход по истории: будет прочитано до **~{hist_n}** файла(ов) "
-    f"(все месяцы до **{d_from}** включительно по датам внутри месяца начала). "
-    "На больших объёмах это может занять **много минут** — не закрывайте вкладку."
-)
-
 if st.button("Посчитать", type="primary"):
     df_work = filter_window_by_categories(df_cat, g1_f, g2_f, g3_f)
     mask_win = (
@@ -254,7 +232,9 @@ if st.button("Посчитать", type="primary"):
     progress.empty()
     status.empty()
 
-    tables, period_to_clients = contribution_tables_from_prev_purchase(df_work, prev_map)
+    tables, period_to_clients = contribution_tables_from_prev_purchase(
+        df_work, prev_map, analysis_start=d_from
+    )
     upload_totals = {
         "Продажи": float(df_work["Продажи"].sum()),
         "Чеки": float(df_work["Количество чеков"].sum()),
@@ -264,7 +244,6 @@ if st.button("Посчитать", type="primary"):
     st.session_state["contribution_tables"] = tables
     st.session_state["upload_totals"] = upload_totals
     st.session_state["period_to_clients"] = period_to_clients
-    st.success("Готово.")
 
 if "contribution_tables" not in st.session_state:
     st.stop()
