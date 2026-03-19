@@ -670,8 +670,20 @@ with st.container(border=True):
             if _n_den == 0:
                 st.warning("У выбранных клиентов нет даты предыдущей покупки в данных.")
             else:
-                st.caption(f"Клиентов в выбранных группах: **{_n_den}**")
-                st.caption("Топ 10 продуктов предыдущих покупок")
+                st.markdown(
+                    '<div style="font-size:2rem;line-height:1.3;margin:0.1rem 0 0.55rem 0;">'
+                    '<span style="color:#000;">Клиентов в выбранных группах: </span>'
+                    f'<span style="color:#1e40af;font-weight:700;">{_n_den}</span>'
+                    "</div>",
+                    unsafe_allow_html=True,
+                )
+                st.markdown(
+                    '<div style="text-align:center;font-size:1.2rem;line-height:1.3;'
+                    'font-weight:700;color:#111;margin:0.15rem 0 0.55rem 0;">'
+                    "Топ 10 продуктов предыдущих покупок"
+                    "</div>",
+                    unsafe_allow_html=True,
+                )
                 _raw_lp_all = st.session_state.get("_lp_rows_all")
                 if isinstance(_raw_lp_all, pd.DataFrame) and not _raw_lp_all.empty:
                     _raw_lp = _raw_lp_all[_raw_lp_all["_cc"].isin(_clients_prev)]
@@ -682,8 +694,14 @@ with st.container(border=True):
                 if _top_lp.empty:
                     st.warning("Нет строк за последний день покупки в base.")
                 else:
+                    _top_lp_show = _top_lp.copy()
+                    if "% клиентов" in _top_lp_show.columns:
+                        _top_lp_show["% клиентов"] = (
+                            _top_lp_show["% клиентов"]
+                            .map(lambda x: f"{float(x):.1f} %")
+                        )
                     st.dataframe(
-                        _top_lp,
+                        _top_lp_show,
                         use_container_width=True,
                         hide_index=True,
                     )
