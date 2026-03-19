@@ -150,7 +150,7 @@ def _table_html(data_rows: list[tuple], total_fmt: str) -> str:
     <td style="{cell_style} text-align: center; color: #000; vertical-align: middle;">100 %</td>
   </tr>
   <tr style="color: #000; {sticky_row2}">
-    <th style="{cell_style} text-align: center; color: #000; vertical-align: middle;">Период реценси</th>
+    <th style="{cell_style} text-align: center; color: #000; vertical-align: middle;">Группа по давности</th>
     <th style="{cell_style} text-align: center; color: #000; vertical-align: middle;">Вклад (ABC)</th>
     <th style="{cell_style} text-align: center; color: #000; vertical-align: middle;">Вклад %</th>
   </tr>
@@ -604,7 +604,7 @@ with st.container(border=True):
                 str(m) for m in df_metric["month_label"] if str(m) != LABEL_NO_BONUS_CARD
             ]
             if month_options:
-                st.caption("Выберите группу (период реценси) для копирования кодов")
+                st.caption("Выберите группу по давности для копирования кодов")
                 col_sel, _ = st.columns([1, 3])
                 with col_sel:
                     sel_key = f"month_sel_{metric_key.replace(' ', '_').replace('.', '_')}"
@@ -631,7 +631,7 @@ with st.container(border=True):
                 st.caption("Нет периодов для выбора кодов (кроме «Клиенты без БК»).")
 
     st.markdown("---")
-    st.subheader("🛒 Анализ последней покупки")
+    st.subheader("🛒 Анализ предыдущей покупки")
     _seg_opts = sorted(
         k
         for k in period_to_clients
@@ -645,7 +645,7 @@ with st.container(border=True):
         st.warning("Нажмите **Применить все фильтры для анализа** заново, чтобы подготовить блок.")
     else:
         _lp_sel = st.multiselect(
-            "Сегменты (клиенты объединяются)",
+            "Отберите группы по давности предыдущей покупки",
             options=_seg_opts,
             default=[],
             key="msel_last_purchase_segments",
@@ -670,6 +670,8 @@ with st.container(border=True):
             if _n_den == 0:
                 st.warning("У выбранных клиентов нет даты предыдущей покупки в данных.")
             else:
+                st.caption(f"Клиентов в выбранных группах: **{_n_den}**")
+                st.caption("Топ 10 продуктов предыдущих покупок")
                 _raw_lp_all = st.session_state.get("_lp_rows_all")
                 if isinstance(_raw_lp_all, pd.DataFrame) and not _raw_lp_all.empty:
                     _raw_lp = _raw_lp_all[_raw_lp_all["_cc"].isin(_clients_prev)]

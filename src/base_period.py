@@ -427,26 +427,22 @@ def top_g2_last_purchase_day(
     df_lines: pd.DataFrame, total_clients: int, top_n: int = 10
 ) -> pd.DataFrame:
     """
-    Топ top_n по Группа2: число клиентов (уникальных) и доля от total_clients, сумма Продажи.
+    Топ top_n по связке Группа1 + Группа2.
+    В итоговую таблицу выводится только % клиентов (доля от total_clients).
     """
     if df_lines.empty or total_clients <= 0:
-        return pd.DataFrame(
-            columns=["Группа2", "Клиентов", "% клиентов", "Продажи"]
-        )
+        return pd.DataFrame(columns=["Группа1", "Группа2", "% клиентов"])
     if "_cc" not in df_lines.columns:
         df_lines = df_lines.copy()
         df_lines["_cc"] = df_lines[COL_CLIENT].map(normalize_client_code)
     g = (
-        df_lines.groupby(COL_G2, as_index=False)
-        .agg(Клиентов=("_cc", "nunique"), Продажи=(COL_SALES, "sum"))
+        df_lines.groupby([COL_G1, COL_G2], as_index=False)
+        .agg(Клиентов=("_cc", "nunique"))
         .sort_values("Клиентов", ascending=False)
         .head(top_n)
     )
     g["% клиентов"] = (g["Клиентов"] / total_clients * 100).round(1)
-    g["Продажи"] = g["Продажи"].round(2)
-    return g[
-        ["Группа2", "Клиентов", "% клиентов", "Продажи"]
-    ].reset_index(drop=True)
+    return g[["Группа1", "Группа2", "% клиентов"]].reset_index(drop=True)
 
 
 def filter_window_by_categories(
