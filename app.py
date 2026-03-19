@@ -671,16 +671,9 @@ with st.container(border=True):
                 st.warning("У выбранных клиентов нет даты предыдущей покупки в данных.")
             else:
                 st.markdown(
-                    '<div style="font-size:2rem;line-height:1.3;margin:0.1rem 0 0.55rem 0;">'
-                    '<span style="color:#000;">Клиентов в выбранных группах: </span>'
-                    f'<span style="color:#1e40af;font-weight:700;">{_n_den}</span>'
-                    "</div>",
-                    unsafe_allow_html=True,
-                )
-                st.markdown(
                     '<div style="text-align:center;font-size:1.2rem;line-height:1.3;'
                     'font-weight:700;color:#111;margin:0.15rem 0 0.55rem 0;">'
-                    "Топ 10 продуктов предыдущих покупок"
+                    f"Топ 10 продуктов предыдущих покупок ( {_n_den} клиентов в отобранных группах )"
                     "</div>",
                     unsafe_allow_html=True,
                 )
