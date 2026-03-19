@@ -673,7 +673,9 @@ with st.container(border=True):
                 st.markdown(
                     '<div style="text-align:center;font-size:1.2rem;line-height:1.3;'
                     'font-weight:700;color:#111;margin:0.15rem 0 0.55rem 0;">'
-                    f"Топ 10 продуктов предыдущих покупок ( {_n_den} клиентов в отобранных группах )"
+                    "Топ 10 продуктов предыдущих покупок ( "
+                    f'<span style="color:#1e40af;">{_n_den}</span>'
+                    " клиентов в отобранных группах )"
                     "</div>",
                     unsafe_allow_html=True,
                 )
