@@ -379,8 +379,7 @@ with st.container(border=True):
                     st.session_state.pop("upload_totals", None)
                     st.session_state.pop("period_to_clients", None)
                     st.session_state.pop("_prev_purchase_map", None)
-                    st.session_state.pop("_lp_cache_sig", None)
-                    st.session_state.pop("_lp_top_df", None)
+                    st.session_state.pop("_lp_rows_all", None)
                     if df_win.empty:
                         st.session_state.pop("window_df", None)
                         st.session_state.pop("window_d_from", None)
@@ -455,8 +454,7 @@ with st.container(border=True):
     if st.button(
         "Применить все фильтры для анализа", type="primary", key="btn_apply_filters"
     ):
-        st.session_state.pop("_lp_cache_sig", None)
-        st.session_state.pop("_lp_top_df", None)
+        st.session_state.pop("_lp_rows_all", None)
         df_work = filter_window_by_categories(df_cat, g1_f, g2_f, g3_f)
         mask_win = (
             pd.to_datetime(df_work["Дата"], errors="coerce").dt.date >= d_from
@@ -500,6 +498,27 @@ with st.container(border=True):
         st.session_state["_prev_purchase_map"] = {
             str(k): pd.Timestamp(v) for k, v in prev_map.items()
         }
+        all_segment_clients: set[str] = set()
+        for seg, raw_codes in period_to_clients.items():
+            if seg == LABEL_NEW_CLIENTS:
+                continue
+            for code in raw_codes:
+                norm = normalize_client_code(code)
+                if norm:
+                    all_segment_clients.add(str(norm))
+        clients_with_prev = {
+            c for c in all_segment_clients if c in st.session_state["_prev_purchase_map"]
+        }
+        if clients_with_prev:
+            with st.spinner("Готовлю блок «Анализ последней покупки»…"):
+                st.session_state["_lp_rows_all"] = load_last_purchase_day_rows(
+                    BASE_DIR,
+                    clients_with_prev,
+                    st.session_state["_prev_purchase_map"],
+                    d_from,
+                )
+        else:
+            st.session_state["_lp_rows_all"] = pd.DataFrame()
 
 if "contribution_tables" not in st.session_state:
     st.stop()
@@ -622,6 +641,8 @@ with st.container(border=True):
         st.info("Нет сегментов для анализа (кроме «Новых клиентов»).")
     elif "_prev_purchase_map" not in st.session_state:
         st.warning("Нажмите **Применить все фильтры для анализа** заново, чтобы загрузить данные.")
+    elif "_lp_rows_all" not in st.session_state:
+        st.warning("Нажмите **Применить все фильтры для анализа** заново, чтобы подготовить блок.")
     else:
         _lp_sel = st.multiselect(
             "Сегменты (клиенты объединяются)",
@@ -649,27 +670,12 @@ with st.container(border=True):
             if _n_den == 0:
                 st.warning("У выбранных клиентов нет даты предыдущей покупки в данных.")
             else:
-                _sig = (tuple(sorted(_lp_sel)), _n_den, str(_d0))
-                if st.session_state.get("_lp_cache_sig") == _sig and isinstance(
-                    st.session_state.get("_lp_top_df"), pd.DataFrame
-                ):
-                    _top_lp = st.session_state["_lp_top_df"]
+                _raw_lp_all = st.session_state.get("_lp_rows_all")
+                if isinstance(_raw_lp_all, pd.DataFrame) and not _raw_lp_all.empty:
+                    _raw_lp = _raw_lp_all[_raw_lp_all["_cc"].isin(_clients_prev)]
                 else:
-
-                    def _lp_cb(cur: int, total: int, name: str):
-                        pass
-
-                    with st.spinner("Сканирую base: строки за последний день покупки…"):
-                        _raw_lp = load_last_purchase_day_rows(
-                            BASE_DIR,
-                            _clients_prev,
-                            _pm,
-                            _d0,
-                            progress=_lp_cb,
-                        )
-                    _top_lp = top_g2_last_purchase_day(_raw_lp, _n_den, top_n=10)
-                    st.session_state["_lp_cache_sig"] = _sig
-                    st.session_state["_lp_top_df"] = _top_lp
+                    _raw_lp = pd.DataFrame()
+                _top_lp = top_g2_last_purchase_day(_raw_lp, _n_den, top_n=10)
 
                 if _top_lp.empty:
                     st.warning("Нет строк за последний день покупки в base.")
