@@ -5,6 +5,7 @@ Recency Contribution Matrix — Streamlit.
 """
 
 import html
+import io
 import sys
 import types
 from datetime import date
@@ -35,6 +36,9 @@ import pandas as pd
 import streamlit as st
 import streamlit.components.v1 as components
 import plotly.graph_objects as go
+from openpyxl import Workbook
+from openpyxl.chart import PieChart, Reference
+from openpyxl.styles import Font
 
 from src.base_period import (
     COL_CLIENT,
@@ -208,6 +212,125 @@ def _copy_codes_block_html(text_to_copy: str, block_id: str) -> str:
 }})();
 </script>
 """
+
+
+def _build_excel_report_bytes(
+    tables: dict[str, pd.DataFrame],
+    upload_totals: dict[str, float],
+    period_to_clients: dict[str, list[str]],
+    prev_purchase_map: dict[str, pd.Timestamp],
+    lp_rows_all: pd.DataFrame,
+) -> bytes:
+    wb = Workbook()
+    wb.remove(wb.active)
+
+    sheet_specs = [
+        ("Вклад в выручку", "Продажи"),
+        ("Вклад в чеки", "Чеки"),
+        ("Вклад в товар", "Товар в шт."),
+        ("Вклад в клиентов", "Клиенты"),
+    ]
+    for sheet_name, metric_key in sheet_specs:
+        ws = wb.create_sheet(title=sheet_name)
+        ws["A1"] = sheet_name
+        ws["A1"].font = Font(size=14, bold=True)
+
+        df_metric = tables.get(metric_key)
+        if df_metric is None or df_metric.empty:
+            ws["A3"] = "Нет данных"
+            continue
+
+        ws["A3"] = "Группа по давности"
+        ws["B3"] = "Вклад (ABC)"
+        ws["C3"] = "Вклад %"
+        for c in ("A3", "B3", "C3"):
+            ws[c].font = Font(bold=True)
+
+        total_value = float(upload_totals.get(metric_key, 0))
+        ws["A4"] = "Итого"
+        ws["B4"] = total_value
+        ws["C4"] = 1
+        ws["C4"].number_format = "0.0%"
+
+        row = 5
+        for _, r in df_metric.iterrows():
+            ws.cell(row=row, column=1, value=str(r["month_label"]))
+            ws.cell(row=row, column=2, value=float(r["value"]))
+            ws.cell(row=row, column=3, value=float(r["pct"]) / 100.0)
+            ws.cell(row=row, column=3).number_format = "0.0%"
+            row += 1
+
+        ws.column_dimensions["A"].width = 34
+        ws.column_dimensions["B"].width = 16
+        ws.column_dimensions["C"].width = 12
+
+        chart = PieChart()
+        chart.title = sheet_name
+        labels = Reference(ws, min_col=1, min_row=5, max_row=row - 1)
+        data = Reference(ws, min_col=2, min_row=5, max_row=row - 1)
+        chart.add_data(data, titles_from_data=False)
+        chart.set_categories(labels)
+        chart.height = 11
+        chart.width = 15
+        ws.add_chart(chart, "E3")
+
+    ws5 = wb.create_sheet(title="Анализ предыдущей покупки")
+    ws5["A1"] = "Анализ предыдущей покупки"
+    ws5["A1"].font = Font(size=14, bold=True)
+    out_row = 3
+
+    seg_names = sorted(
+        k for k in period_to_clients.keys() if k != LABEL_NEW_CLIENTS and period_to_clients.get(k)
+    )
+    if not seg_names:
+        ws5["A3"] = "Нет групп для анализа"
+    else:
+        for seg in seg_names:
+            clients = set()
+            for c in period_to_clients.get(seg, []):
+                nc = normalize_client_code(c)
+                if nc and nc in prev_purchase_map:
+                    clients.add(str(nc))
+            n_clients = len(clients)
+
+            ws5.cell(row=out_row, column=1, value=f"{seg} ({n_clients} клиентов)")
+            ws5.cell(row=out_row, column=1).font = Font(bold=True)
+            out_row += 1
+
+            ws5.cell(row=out_row, column=1, value="Группа1")
+            ws5.cell(row=out_row, column=2, value="Группа2")
+            ws5.cell(row=out_row, column=3, value="% клиентов")
+            for col in range(1, 4):
+                ws5.cell(row=out_row, column=col).font = Font(bold=True)
+            out_row += 1
+
+            if n_clients == 0 or lp_rows_all.empty:
+                ws5.cell(row=out_row, column=1, value="Нет данных")
+                out_row += 2
+                continue
+
+            raw_seg = lp_rows_all[lp_rows_all["_cc"].isin(clients)]
+            top_seg = top_g2_last_purchase_day(raw_seg, n_clients, top_n=10)
+            if top_seg.empty:
+                ws5.cell(row=out_row, column=1, value="Нет данных")
+                out_row += 2
+                continue
+
+            for _, rr in top_seg.iterrows():
+                ws5.cell(row=out_row, column=1, value=str(rr["Группа1"]))
+                ws5.cell(row=out_row, column=2, value=str(rr["Группа2"]))
+                ws5.cell(row=out_row, column=3, value=float(rr["% клиентов"]) / 100.0)
+                ws5.cell(row=out_row, column=3).number_format = "0.0%"
+                out_row += 1
+            out_row += 1
+
+    ws5.column_dimensions["A"].width = 40
+    ws5.column_dimensions["B"].width = 40
+    ws5.column_dimensions["C"].width = 12
+
+    buffer = io.BytesIO()
+    wb.save(buffer)
+    return buffer.getvalue()
 
 
 st.set_page_config(page_title="Recency Contribution", layout="wide")
@@ -523,14 +646,42 @@ with st.container(border=True):
 if "contribution_tables" not in st.session_state:
     st.stop()
 
-st.divider()
-st.subheader("Результаты анализа")
-
 tables = st.session_state["contribution_tables"]
 upload_totals = st.session_state["upload_totals"]
 period_to_clients = st.session_state["period_to_clients"]
 _d0 = st.session_state.get("period_d_from")
 _d1 = st.session_state.get("period_d_to")
+_prev_map_for_export = st.session_state.get("_prev_purchase_map", {})
+_lp_rows_all_for_export = st.session_state.get("_lp_rows_all", pd.DataFrame())
+
+_report_bytes = _build_excel_report_bytes(
+    tables=tables,
+    upload_totals=upload_totals,
+    period_to_clients=period_to_clients,
+    prev_purchase_map=_prev_map_for_export if isinstance(_prev_map_for_export, dict) else {},
+    lp_rows_all=_lp_rows_all_for_export
+    if isinstance(_lp_rows_all_for_export, pd.DataFrame)
+    else pd.DataFrame(),
+)
+
+_file_suffix = ""
+if _d0 and _d1:
+    _file_suffix = f"_{_d0.strftime('%Y%m%d')}_{_d1.strftime('%Y%m%d')}"
+st.download_button(
+    "Скачать отчет в Excel",
+    data=_report_bytes,
+    file_name=f"recency_report{_file_suffix}.xlsx",
+    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    use_container_width=False,
+    key="btn_download_excel_report",
+)
+
+st.markdown(
+    '<div style="height:1px;background:linear-gradient(90deg,transparent,#b8c5d6,transparent);'
+    'margin:0.85rem 0 0.35rem 0;"></div>',
+    unsafe_allow_html=True,
+)
+st.subheader("Результаты анализа")
 
 with st.container(border=True):
     if _d0 and _d1:
