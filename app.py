@@ -220,7 +220,26 @@ def _build_excel_report_bytes(
     period_to_clients: dict[str, list[str]],
     prev_purchase_map: dict[str, pd.Timestamp],
     lp_rows_all: pd.DataFrame,
+    period_from: Optional[date],
+    period_to: Optional[date],
+    filter_g1: Optional[list[str]],
+    filter_g2: Optional[list[str]],
+    filter_g3: Optional[list[str]],
 ) -> bytes:
+    def _fmt_filter(vals: Optional[list[str]]) -> str:
+        if not vals:
+            return "Все"
+        return ", ".join(str(v) for v in vals)
+
+    period_text = (
+        f"{period_from.strftime('%d.%m.%Y')} — {period_to.strftime('%d.%m.%Y')}"
+        if period_from and period_to
+        else "Не задан"
+    )
+    f1 = _fmt_filter(filter_g1)
+    f2 = _fmt_filter(filter_g2)
+    f3 = _fmt_filter(filter_g3)
+
     wb = Workbook()
     wb.remove(wb.active)
 
@@ -234,25 +253,27 @@ def _build_excel_report_bytes(
         ws = wb.create_sheet(title=sheet_name)
         ws["A1"] = sheet_name
         ws["A1"].font = Font(size=14, bold=True)
+        ws["A2"] = f"Период анализа: {period_text}"
+        ws["A3"] = f"Категории: Группа1={f1}; Группа2={f2}; Группа3={f3}"
 
         df_metric = tables.get(metric_key)
         if df_metric is None or df_metric.empty:
-            ws["A3"] = "Нет данных"
+            ws["A5"] = "Нет данных"
             continue
 
-        ws["A3"] = "Группа по давности"
-        ws["B3"] = "Вклад (ABC)"
-        ws["C3"] = "Вклад %"
-        for c in ("A3", "B3", "C3"):
+        ws["A5"] = "Группа по давности"
+        ws["B5"] = "Вклад (ABC)"
+        ws["C5"] = "Вклад %"
+        for c in ("A5", "B5", "C5"):
             ws[c].font = Font(bold=True)
 
         total_value = float(upload_totals.get(metric_key, 0))
-        ws["A4"] = "Итого"
-        ws["B4"] = total_value
-        ws["C4"] = 1
-        ws["C4"].number_format = "0.0%"
+        ws["A6"] = "Итого"
+        ws["B6"] = total_value
+        ws["C6"] = 1
+        ws["C6"].number_format = "0.0%"
 
-        row = 5
+        row = 7
         for _, r in df_metric.iterrows():
             ws.cell(row=row, column=1, value=str(r["month_label"]))
             ws.cell(row=row, column=2, value=float(r["value"]))
@@ -266,18 +287,20 @@ def _build_excel_report_bytes(
 
         chart = PieChart()
         chart.title = sheet_name
-        labels = Reference(ws, min_col=1, min_row=5, max_row=row - 1)
-        data = Reference(ws, min_col=2, min_row=5, max_row=row - 1)
+        labels = Reference(ws, min_col=1, min_row=7, max_row=row - 1)
+        data = Reference(ws, min_col=2, min_row=7, max_row=row - 1)
         chart.add_data(data, titles_from_data=False)
         chart.set_categories(labels)
         chart.height = 11
         chart.width = 15
-        ws.add_chart(chart, "E3")
+        ws.add_chart(chart, "E5")
 
     ws5 = wb.create_sheet(title="Анализ предыдущей покупки")
     ws5["A1"] = "Анализ предыдущей покупки"
     ws5["A1"].font = Font(size=14, bold=True)
-    out_row = 3
+    ws5["A2"] = f"Период анализа: {period_text}"
+    ws5["A3"] = f"Категории: Группа1={f1}; Группа2={f2}; Группа3={f3}"
+    out_row = 5
 
     seg_names = sorted(
         k for k in period_to_clients.keys() if k != LABEL_NEW_CLIENTS and period_to_clients.get(k)
@@ -352,6 +375,22 @@ st.markdown(
     [data-testid="stVerticalBlockBorderWrapper"] {
         padding: 1.25rem 1.5rem !important;
         border-radius: 10px !important;
+    }
+    /* Заметная кнопка выгрузки Excel */
+    [data-testid="stDownloadButton"] > button {
+        background: linear-gradient(90deg, #0d2847, #164a7d) !important;
+        color: #fff !important;
+        border: 1px solid #0d2847 !important;
+        min-height: 3rem !important;
+        padding: 0.7rem 1.35rem !important;
+        font-size: 1.08rem !important;
+        font-weight: 700 !important;
+        border-radius: 0.65rem !important;
+        box-shadow: 0 4px 14px rgba(13, 40, 71, 0.28) !important;
+    }
+    [data-testid="stDownloadButton"] > button:hover {
+        background: linear-gradient(90deg, #164a7d, #1e5d99) !important;
+        border-color: #164a7d !important;
     }
     </style>
     """,
@@ -503,6 +542,7 @@ with st.container(border=True):
                     st.session_state.pop("period_to_clients", None)
                     st.session_state.pop("_prev_purchase_map", None)
                     st.session_state.pop("_lp_rows_all", None)
+                    st.session_state.pop("_analysis_filters", None)
                     if df_win.empty:
                         st.session_state.pop("window_df", None)
                         st.session_state.pop("window_d_from", None)
@@ -618,6 +658,11 @@ with st.container(border=True):
         st.session_state["contribution_tables"] = tables
         st.session_state["upload_totals"] = upload_totals
         st.session_state["period_to_clients"] = period_to_clients
+        st.session_state["_analysis_filters"] = {
+            "g1": list(sel1),
+            "g2": list(sel2),
+            "g3": list(sel3),
+        }
         st.session_state["_prev_purchase_map"] = {
             str(k): pd.Timestamp(v) for k, v in prev_map.items()
         }
@@ -653,6 +698,10 @@ _d0 = st.session_state.get("period_d_from")
 _d1 = st.session_state.get("period_d_to")
 _prev_map_for_export = st.session_state.get("_prev_purchase_map", {})
 _lp_rows_all_for_export = st.session_state.get("_lp_rows_all", pd.DataFrame())
+_analysis_filters = st.session_state.get("_analysis_filters", {})
+_f_g1 = _analysis_filters.get("g1") if isinstance(_analysis_filters, dict) else None
+_f_g2 = _analysis_filters.get("g2") if isinstance(_analysis_filters, dict) else None
+_f_g3 = _analysis_filters.get("g3") if isinstance(_analysis_filters, dict) else None
 
 _report_bytes = _build_excel_report_bytes(
     tables=tables,
@@ -662,6 +711,11 @@ _report_bytes = _build_excel_report_bytes(
     lp_rows_all=_lp_rows_all_for_export
     if isinstance(_lp_rows_all_for_export, pd.DataFrame)
     else pd.DataFrame(),
+    period_from=_d0,
+    period_to=_d1,
+    filter_g1=_f_g1 if isinstance(_f_g1, list) else None,
+    filter_g2=_f_g2 if isinstance(_f_g2, list) else None,
+    filter_g3=_f_g3 if isinstance(_f_g3, list) else None,
 )
 
 _file_suffix = ""
