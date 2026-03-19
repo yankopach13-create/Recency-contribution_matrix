@@ -361,16 +361,16 @@ st.markdown(
     """
     <style>
     button[kind="primary"] {
-        background-color: #0d2847 !important;
-        border: 1px solid #0d2847 !important;
+        background-color: #6b7280 !important;
+        border: 1px solid #6b7280 !important;
         color: #fff !important;
     }
     button[kind="primary"]:hover {
-        background-color: #164a7d !important;
-        border-color: #164a7d !important;
+        background-color: #4b5563 !important;
+        border-color: #4b5563 !important;
         color: #fff !important;
     }
-    button[kind="primary"]:focus { box-shadow: 0 0 0 2px #fff, 0 0 0 4px #0d2847 !important; }
+    button[kind="primary"]:focus { box-shadow: 0 0 0 2px #fff, 0 0 0 4px #6b7280 !important; }
     /* Внутренние отступы у рамок блоков */
     [data-testid="stVerticalBlockBorderWrapper"] {
         padding: 1.25rem 1.5rem !important;
@@ -718,13 +718,13 @@ _report_bytes = _build_excel_report_bytes(
     filter_g3=_f_g3 if isinstance(_f_g3, list) else None,
 )
 
-_file_suffix = ""
+_file_name = "вклад в период.xlsx"
 if _d0 and _d1:
-    _file_suffix = f"_{_d0.strftime('%Y%m%d')}_{_d1.strftime('%Y%m%d')}"
+    _file_name = f"вклад в период {_d0.strftime('%d.%m.%Y')} - {_d1.strftime('%d.%m.%Y')}.xlsx"
 st.download_button(
     "Скачать отчет в Excel",
     data=_report_bytes,
-    file_name=f"recency_report{_file_suffix}.xlsx",
+    file_name=_file_name,
     mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
     use_container_width=False,
     key="btn_download_excel_report",
