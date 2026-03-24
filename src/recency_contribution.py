@@ -58,20 +58,13 @@ MONTH_NAMES = {
 
 
 def _add_recency_month(df: pd.DataFrame, date_col: str = "last_purchase_date") -> pd.DataFrame:
-    """Добавляет year_month, month_label и period_label (2024 — по кварталам, остальные годы — по месяцам)."""
+    """Добавляет year_month, month_label и period_label (всегда по месяцам)."""
     out = df.copy()
     out["year_month"] = out[date_col].dt.to_period("M").astype(str)
     out["month_label"] = (
         out[date_col].dt.month.map(MONTH_NAMES) + " " + out[date_col].dt.year.astype(str)
     )
-    year = out[date_col].dt.year
-    month = out[date_col].dt.month
-    quarter = (month - 1) // 3 + 1
-    out["period_label"] = np.where(
-        year == 2024,
-        "C" + quarter.astype(str) + " " + year.astype(str),
-        out["month_label"],
-    )
+    out["period_label"] = out["month_label"]
     return out
 
 
@@ -279,21 +272,11 @@ def _analysis_start_as_date(d) -> date:
     return pd.Timestamp(d).date()
 
 
-def _one_year_before_analysis(d_from: date) -> date:
-    """Та же календарная дата год назад (для границы «ровно год до начала анализа»)."""
-    d_from = _analysis_start_as_date(d_from)
-    try:
-        return date(d_from.year - 1, d_from.month, d_from.day)
-    except ValueError:
-        return date(d_from.year - 1, 2, 28)
-
-
 def prev_purchase_ts_to_period_label(ts: pd.Timestamp, analysis_start) -> Optional[str]:
     """
     Подпись периода реценси относительно начала анализа (analysis_start = первый день окна):
     предыдущая покупка строго раньше analysis_start.
-    — Раньше чем за календарный год до analysis_start → квартал (C1 … C4 ГГГГ).
-    — От годовщины (включительно) до начала анализа → месяц (Январь ГГГГ …).
+    Группировка всегда по месяцам (Январь ГГГГ, Февраль ГГГГ и т.д.).
     """
     if pd.isna(ts):
         return None
@@ -301,14 +284,9 @@ def prev_purchase_ts_to_period_label(ts: pd.Timestamp, analysis_start) -> Option
     prev_d = pd.Timestamp(ts).date()
     if prev_d >= analysis_start:
         return None
-    cutoff = _one_year_before_analysis(analysis_start)
     year = int(prev_d.year)
     month = int(prev_d.month)
-    month_label = MONTH_NAMES[month] + " " + str(year)
-    if prev_d < cutoff:
-        quarter = (month - 1) // 3 + 1
-        return f"C{quarter} {year}"
-    return month_label
+    return MONTH_NAMES[month] + " " + str(year)
 
 
 def contribution_tables_from_prev_purchase(
